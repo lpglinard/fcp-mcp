@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: # Specify your branches here
-      - main # The 'main' branch
-      - 'releases/*' # The release branches
+    branches:
+      - main
+      - 'releases/*'
 
 jobs:
   qodana:
@@ -20,7 +20,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}  # to check out the actual pull request commit, not the merge commit
           fetch-depth: 0  # a full history is required for pull request analysis
       - name: 'Qodana Scan'
-        uses: JetBrains/qodana-action@v2026.2
+        uses: JetBrains/qodana-action@13e3acbbaeb2cbfc37893b98e74594985edf42eb # v2026.2.4
         with:
           pr-mode: false
         env:

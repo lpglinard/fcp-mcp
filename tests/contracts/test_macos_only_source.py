@@ -1870,3 +1870,47 @@ def test_checker_cli_exits_nonzero_and_reports_stable_marker(tmp_path):
     assert result.returncode == 1
     assert "src/fcp_mcp/bad.py: forbidden source marker WinDLL" in result.stdout
     assert "PRIVATE_VALUE" not in result.stdout
+
+
+QODANA_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / (
+    "qodana_code_quality.yml"
+)
+
+
+def test_checker_accepts_reviewed_qodana_workflow(tmp_path):
+    _write_valid_repository(tmp_path)
+    baseline = check(tmp_path)
+    target = tmp_path / ".github" / "workflows" / "qodana_code_quality.yml"
+    target.write_text(QODANA_WORKFLOW.read_text(encoding="utf-8"), encoding="utf-8")
+
+    assert check(tmp_path) == baseline
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        (
+            "JetBrains/qodana-action@13e3acbbaeb2cbfc37893b98e74594985edf42eb",
+            "JetBrains/qodana-action@v2026.2",
+        ),
+        ("runs-on: ubuntu-latest", "runs-on: windows-latest"),
+        ("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request_target:\n"),
+        ("pr-mode: false", "pr-mode: true"),
+        (
+            "      - name: 'Qodana Scan'\n",
+            "      - run: python -m pytest\n      - name: 'Qodana Scan'\n",
+        ),
+        ("      checks: write\n", "      checks: write\n      id-token: write\n"),
+    ],
+)
+def test_checker_rejects_qodana_workflow_mutations(tmp_path, old, new):
+    _write_valid_repository(tmp_path)
+    text = QODANA_WORKFLOW.read_text(encoding="utf-8")
+    assert old in text
+    target = tmp_path / ".github" / "workflows" / "qodana_code_quality.yml"
+    target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    assert (
+        ".github/workflows/qodana_code_quality.yml: workflow differs from reviewed "
+        "analysis-only trajectory"
+    ) in check(tmp_path)
