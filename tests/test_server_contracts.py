@@ -780,3 +780,22 @@ async def test_wire_identity_and_doctor_versions_are_truthful(tmp_path: Path):
     assert result.structured_content["package_version"] == "0.3.0"
     assert result.structured_content["mcp_sdk_version"] == distribution_version("mcp")
     assert result.structured_content["wire_server_version"] == package_version()
+
+
+def test_monkeypatch_undo_restores_runtime_owned_attributes_through_facade():
+    """pytest >= 9.2 restores via the facade's own __dict__ unless a data
+    descriptor owns the name; undo must never erase the runtime attribute."""
+    runtime = server._load_runtime()
+    original_config = runtime.CONFIG
+    original_paths = runtime.PATHS
+    sentinel = object()
+
+    for _ in range(2):
+        with pytest.MonkeyPatch.context() as patcher:
+            patcher.setattr(server, "CONFIG", sentinel)
+            patcher.setattr(server, "PATHS", sentinel)
+            assert runtime.CONFIG is sentinel
+            assert server.PATHS is sentinel
+        assert runtime.CONFIG is original_config
+        assert runtime.PATHS is original_paths
+        assert server.PATHS is original_paths

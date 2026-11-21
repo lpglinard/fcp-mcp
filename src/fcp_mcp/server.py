@@ -15,7 +15,9 @@ _FACADE_OWNED_NAMES = frozenset(
     {
         "_FACADE_OWNED_NAMES",
         "_RUNTIME_MODULE",
+        "_RuntimeAttribute",
         "_ServerFacade",
+        "_expose_runtime_attributes",
         "_load_runtime",
         "_runtime",
         "Any",
@@ -50,7 +52,45 @@ def _load_runtime() -> ModuleType:
                 _runtime.PROMPTS,
                 _runtime.RESOURCES,
             )
+        _expose_runtime_attributes(_runtime)
     return _runtime
+
+
+class _RuntimeAttribute:
+    """Data descriptor that forwards one runtime-owned name through the facade.
+
+    Being a *data* descriptor on the facade's type matters: tools such as
+    ``pytest.MonkeyPatch`` (>= 9.2) only read the previous value through
+    ``getattr`` when a data descriptor owns the name. Otherwise they read the
+    facade's own ``__dict__``, find nothing, and "restore" by deleting the
+    attribute, which the facade would forward and erase from the runtime.
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def __get__(self, instance: object, owner: type | None = None) -> Any:
+        if instance is None:
+            return self
+        return getattr(_load_runtime(), self._name)
+
+    def __set__(self, instance: object, value: Any) -> None:
+        setattr(_load_runtime(), self._name, value)
+
+    def __delete__(self, instance: object) -> None:
+        delattr(_load_runtime(), self._name)
+
+
+def _expose_runtime_attributes(runtime: ModuleType) -> None:
+    for name in list(vars(runtime)):
+        if (
+            name in _FACADE_OWNED_NAMES
+            or (name.startswith("__") and name.endswith("__"))
+            or name in vars(_ServerFacade)
+            or name in vars(ModuleType)
+        ):
+            continue
+        setattr(_ServerFacade, name, _RuntimeAttribute(name))
 
 
 def main(profile_override: str | None = None) -> None:
