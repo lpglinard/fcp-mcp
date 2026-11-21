@@ -11,6 +11,14 @@ from fcp_mcp.fcp_control import import_bridge as bridge
 from fcp_mcp.profiles import ApprovalMode
 from fcp_mcp.workflow.artifacts import ArtifactKind
 
+# Most bridge paths validate candidates against the Apple DTD and factory Motion
+# templates shipped inside Final Cut Pro. GitHub macOS runners do not have it.
+REQUIRES_INSTALLED_FCP = pytest.mark.skipif(
+    not (bridge.FCP_RESOURCES / "FCPXMLv1_11.dtd").is_file()
+    or not bridge.MOTION_TEMPLATES.is_dir(),
+    reason="requires Final Cut Pro at /Applications/Final Cut Pro.app (Apple DTD, Motion templates)",
+)
+
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
@@ -67,6 +75,7 @@ def add_observed_project(inventory, duration="120/30s"):
     ]
 
 
+@REQUIRES_INSTALLED_FCP
 def test_prepare_is_offline_and_targets_exact_library_with_real_dtd(setup):
     original = setup[1].read_bytes()
     _runtime, prepared = prepare(setup)
@@ -110,6 +119,7 @@ def test_prepare_rejects_unsafe_or_unsupported_input_before_app(setup, mode, tmp
     assert not (tmp_path / "Absent.fcpbundle").exists()
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize(
     "mode", ["hash", "live", "cli", "expired", "source", "candidate", "library"]
 )
@@ -141,6 +151,7 @@ def test_request_guards_before_any_app_call(setup, mode):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("mode", ["closed", "duplicate", "conflict", "query_failure"])
 def test_preflight_blocks_unsent_requests(setup, mode, monkeypatch):
     runtime, prepared = prepare(setup)
@@ -162,6 +173,7 @@ def test_preflight_blocks_unsent_requests(setup, mode, monkeypatch):
     assert all(program is bridge.INSPECT_LIBRARIES for program, _ in setup[3])
 
 
+@REQUIRES_INSTALLED_FCP
 def test_acceptance_is_not_completion_and_retry_never_dispatches_twice(setup):
     runtime, prepared = prepare(setup)
     result = runtime.request(prepared.prepared_id, prepared.plan_sha256)
@@ -183,6 +195,7 @@ def test_acceptance_is_not_completion_and_retry_never_dispatches_twice(setup):
     assert len([c for c in setup[3] if c[0] is bridge.OPEN_DOCUMENT]) == 1
 
 
+@REQUIRES_INSTALLED_FCP
 def test_review_candidate_mutation_during_preflight_blocks_dispatch(setup, monkeypatch):
     runtime, prepared = prepare(setup)
     original = bridge.automation.run_osascript
@@ -202,6 +215,7 @@ def test_review_candidate_mutation_during_preflight_blocks_dispatch(setup, monke
     assert runtime._record(prepared.prepared_id) is None
 
 
+@REQUIRES_INSTALLED_FCP
 def test_media_symlink_retarget_cannot_escape_snapshot(setup, monkeypatch, tmp_path):
     _config, source, _library, calls, _ = setup
     media = tmp_path / "clip.mov"
@@ -232,6 +246,7 @@ def test_media_symlink_retarget_cannot_escape_snapshot(setup, monkeypatch, tmp_p
         outside.unlink()
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize(
     "mode", ["xml", "media", "permissions", "directory", "symlink", "replacement"]
 )
@@ -267,6 +282,7 @@ def test_corrupt_staging_blocks_before_native_call(setup, mode):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_public_path_policy_cannot_modify_retained_staging(setup):
     runtime, prepared = prepare(setup)
     folder = runtime.staging.path(prepared.prepared_id)
@@ -283,7 +299,15 @@ def test_public_path_policy_cannot_modify_retained_staging(setup):
 
 
 @pytest.mark.parametrize(
-    "mode", ["external", "mismatched", "remote", "traversal", "factory", "builtin"]
+    "mode",
+    [
+        "external",
+        "mismatched",
+        "remote",
+        "traversal",
+        pytest.param("factory", marks=REQUIRES_INSTALLED_FCP),
+        pytest.param("builtin", marks=REQUIRES_INSTALLED_FCP),
+    ],
 )
 def test_motion_effect_locator_policy(setup, mode):
     uid = ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"
@@ -313,6 +337,7 @@ def test_motion_effect_locator_policy(setup, mode):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_bookmark_removed_and_locator_rejected(setup):
     source = setup[1]
     data = source.read_text()
@@ -340,6 +365,7 @@ def test_staging_budget_failure_leaves_no_dispatchable_plan(setup):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("mode", ["source", "library", "staged_media"])
 def test_preflight_state_change_never_sends_unreviewed_import(setup, monkeypatch, mode):
     runtime, prepared = prepare(setup)
@@ -438,6 +464,7 @@ async def test_bridge_mcp_rejects_unknown_and_wrong_type_arguments(setup, monkey
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_ambiguous_send_is_recorded_before_transport_and_survives_restart(setup, monkeypatch):
     runtime, prepared = prepare(setup)
     original = bridge.automation.run_osascript
@@ -457,6 +484,7 @@ def test_ambiguous_send_is_recorded_before_transport_and_survives_restart(setup,
     assert again.status == "ambiguous"
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("mode", ["pending", "wrong_library", "duplicate", "duration", "success"])
 def test_reconciliation_observes_metadata_without_resending(setup, mode):
     runtime, prepared = prepare(setup)
@@ -481,12 +509,14 @@ def test_reconciliation_observes_metadata_without_resending(setup, mode):
         assert runtime._record(runtime._guard_id(plan)).status == "metadata_observed"
 
 
+@REQUIRES_INSTALLED_FCP
 def test_reconcile_unsent_does_not_contact_app(setup):
     runtime, prepared = prepare(setup)
     assert runtime.reconcile(prepared.prepared_id).issue.code == "not_dispatched"
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_crash_after_durable_intent_prevents_duplicate_after_restart(setup, monkeypatch):
     runtime, prepared = prepare(setup)
     original = bridge.automation.run_osascript
@@ -508,6 +538,7 @@ def test_crash_after_durable_intent_prevents_duplicate_after_restart(setup, monk
     assert restarted.reconcile(prepared.prepared_id).status == "metadata_observed"
 
 
+@REQUIRES_INSTALLED_FCP
 def test_new_import_can_follow_terminal_observation_but_old_request_cannot_repeat(setup):
     runtime, prepared = prepare(setup)
     runtime.request(prepared.prepared_id, prepared.plan_sha256)
@@ -527,6 +558,7 @@ def test_new_import_can_follow_terminal_observation_but_old_request_cannot_repea
     assert len([c for c in setup[3] if c[0] is bridge.OPEN_DOCUMENT]) == 2
 
 
+@REQUIRES_INSTALLED_FCP
 def test_media_disappearance_uses_retained_snapshot(setup):
     runtime, prepared = prepare(setup)
     (setup[1].parent / "clip.mov").unlink()
@@ -538,6 +570,7 @@ def test_media_disappearance_uses_retained_snapshot(setup):
     assert staged.read_bytes() == b"media path fixture; not decoded"
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.asyncio
 async def test_public_mcp_schema_and_calls_preserve_truthful_results(setup, monkeypatch):
     from mcp.server.mcpserver.exceptions import ToolError
@@ -574,6 +607,7 @@ async def test_public_mcp_schema_and_calls_preserve_truthful_results(setup, monk
     assert response.structured_content["import_completed"] is None
 
 
+@REQUIRES_INSTALLED_FCP
 def test_native_posix_library_observation_can_match_exact_target(setup):
     runtime, prepared = prepare(setup)
     setup[4][0]["file"] = str(setup[2])
@@ -582,6 +616,7 @@ def test_native_posix_library_observation_can_match_exact_target(setup):
     )
 
 
+@REQUIRES_INSTALLED_FCP
 def test_acknowledgement_persistence_failure_stays_ambiguous_without_resend(setup, monkeypatch):
     runtime, prepared = prepare(setup)
     original = runtime._write_record
@@ -601,6 +636,7 @@ def test_acknowledgement_persistence_failure_stays_ambiguous_without_resend(setu
     assert len([c for c in setup[3] if c[0] is bridge.OPEN_DOCUMENT]) == 1
 
 
+@REQUIRES_INSTALLED_FCP
 def test_concurrent_call_never_sends_second_appleevent(setup, monkeypatch):
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -629,6 +665,7 @@ def test_concurrent_call_never_sends_second_appleevent(setup, monkeypatch):
     assert len([c for c in setup[3] if c[0] is bridge.OPEN_DOCUMENT]) == 1
 
 
+@REQUIRES_INSTALLED_FCP
 def test_expiry_during_native_preflight_blocks_before_intent(setup, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
@@ -655,6 +692,7 @@ def test_expiry_during_native_preflight_blocks_before_intent(setup, monkeypatch)
     assert runtime._record(prepared.prepared_id) is None
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("expiry", ["not-a-date", "2027-01-01T00:00:00"])
 def test_invalid_persisted_expiry_cannot_authorize_a_send(setup, expiry):
     runtime, prepared = prepare(setup)
@@ -670,6 +708,7 @@ def test_invalid_persisted_expiry_cannot_authorize_a_send(setup, expiry):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("phase", ["request", "reconcile"])
 @pytest.mark.parametrize(
     "mode", ["denied", "not_json", "not_list", "unknown_field", "bad_duration"]
@@ -712,6 +751,7 @@ def test_bad_native_inspection_is_typed_and_never_clears_pending(setup, monkeypa
         assert runtime._record(prepared.prepared_id) is None
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("failed_write", [1, 2])
 def test_partial_intent_persistence_never_sends_and_restart_is_conservative(
     setup, monkeypatch, failed_write
@@ -750,6 +790,7 @@ def test_partial_intent_persistence_never_sends_and_restart_is_conservative(
     )
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("record_kind", ["attempt", "library_guard"])
 @pytest.mark.parametrize("mode", ["json", "extra", "wrong_type", "symlink"])
 def test_corrupted_persistent_record_blocks_a_second_send(setup, record_kind, mode):
@@ -776,7 +817,13 @@ def test_corrupted_persistent_record_blocks_a_second_send(setup, record_kind, mo
 
 
 @pytest.mark.parametrize(
-    "mode", ["source_denied", "media_parent_symlink", "extra_staged_file", "stage_parent_symlink"]
+    "mode",
+    [
+        pytest.param("source_denied", marks=REQUIRES_INSTALLED_FCP),
+        "media_parent_symlink",
+        pytest.param("extra_staged_file", marks=REQUIRES_INSTALLED_FCP),
+        pytest.param("stage_parent_symlink", marks=REQUIRES_INSTALLED_FCP),
+    ],
 )
 def test_permission_and_path_changes_fail_closed(setup, monkeypatch, mode):
     import os
@@ -831,6 +878,7 @@ def test_permission_and_path_changes_fail_closed(setup, monkeypatch, mode):
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_changed_references_fail_but_repeated_media_refs_snapshot_once(setup):
     source = setup[1]
     data = source.read_text()
@@ -852,7 +900,14 @@ def test_changed_references_fail_but_repeated_media_refs_snapshot_once(setup):
     assert setup[3] == []
 
 
-@pytest.mark.parametrize("mode", ["factory_escape", "scoped_external", "native_uid"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "factory_escape",
+        "scoped_external",
+        pytest.param("native_uid", marks=REQUIRES_INSTALLED_FCP),
+    ],
+)
 def test_effect_policy_checks_trusted_factory_containment(setup, monkeypatch, mode):
     base = setup[1].parent
     factory = base / "factory"
@@ -882,6 +937,7 @@ def test_effect_policy_checks_trusted_factory_containment(setup, monkeypatch, mo
     assert setup[3] == []
 
 
+@REQUIRES_INSTALLED_FCP
 def test_ambiguous_reconciliation_preserves_guard_across_restart(setup):
     runtime, prepared = prepare(setup)
     runtime.request(prepared.prepared_id, prepared.plan_sha256)
@@ -899,6 +955,7 @@ def test_ambiguous_reconciliation_preserves_guard_across_restart(setup):
     assert len([c for c in setup[3] if c[0] is bridge.OPEN_DOCUMENT]) == 1
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.asyncio
 async def test_mcp_results_reject_false_completion_and_validate_success_schema(setup, monkeypatch):
     from jsonschema import validate
@@ -962,6 +1019,7 @@ else:
 """
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.parametrize("worker_death", [False, True])
 def test_cross_process_duplicate_and_worker_death_never_resend(setup, worker_death):
     import os
@@ -1048,6 +1106,7 @@ def test_cross_process_duplicate_and_worker_death_never_resend(setup, worker_dea
             process.communicate(timeout=5)
 
 
+@REQUIRES_INSTALLED_FCP
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed_mode", [False, True])
 async def test_real_stdio_external_state_survives_handoff_or_rejects_mode_change(
