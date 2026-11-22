@@ -47,6 +47,8 @@ PUBLISH_ACTION = (
 RELEASE_ARTIFACT = "fcp-mcp-v0.3.0-release-dist"
 RELEASE_MANIFEST = "fcp-mcp-v0.3.0.sha256"
 REGISTRY_WORKFLOW = ".github/workflows/publish-registry.yml"
+QODANA_WORKFLOW = ".github/workflows/qodana_code_quality.yml"
+QODANA_ACTION = "JetBrains/qodana-action@13e3acbbaeb2cbfc37893b98e74594985edf42eb"
 REGISTRY_PUBLISHER_DIGEST = (
     "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
 )
@@ -171,7 +173,12 @@ def _check_workflow_inventory(root: Path, findings: list[str]) -> None:
             ".github/workflows: required workflow directory is missing or unsafe"
         )
         return
-    expected = {"ci.yml", "publish.yml", "publish-registry.yml"}
+    expected = {
+        "ci.yml",
+        "publish.yml",
+        "publish-registry.yml",
+        "qodana_code_quality.yml",
+    }
     try:
         entries = sorted(directory.iterdir(), key=lambda path: path.name)
     except OSError:
@@ -852,6 +859,60 @@ def _check_registry_publish(root: Path, findings: list[str]) -> None:
             )
 
 
+def _expected_qodana_workflow() -> dict[str, Any]:
+    return {
+        "name": "Qodana",
+        "on": {
+            "workflow_dispatch": None,
+            "pull_request": None,
+            "push": {"branches": ["main", "releases/*"]},
+        },
+        "jobs": {
+            "qodana": {
+                "runs-on": PUBLISH_RUNNER,
+                "permissions": {
+                    "contents": "write",
+                    "pull-requests": "write",
+                    "checks": "write",
+                },
+                "steps": [
+                    {
+                        "uses": CHECKOUT_ACTION,
+                        "with": {
+                            "ref": "${{ github.event.pull_request.head.sha }}",
+                            "fetch-depth": 0,
+                        },
+                    },
+                    {
+                        "name": "Qodana Scan",
+                        "uses": QODANA_ACTION,
+                        "with": {"pr-mode": False},
+                        "env": {
+                            "QODANA_TOKEN": "${{ secrets.QODANA_TOKEN_1425293392 }}",
+                            "QODANA_ENDPOINT": "https://qodana.cloud",
+                        },
+                    },
+                ],
+            }
+        },
+    }
+
+
+def _check_qodana(root: Path, findings: list[str]) -> None:
+    """Qodana is an optional, analysis-only exception; when present it must be exact."""
+
+    path = root / QODANA_WORKFLOW
+    if not path.exists() and not path.is_symlink():
+        return
+    workflow = _load_yaml(path, root, findings)
+    if workflow is None:
+        return
+    if workflow != _expected_qodana_workflow():
+        findings.append(
+            f"{QODANA_WORKFLOW}: workflow differs from reviewed analysis-only trajectory"
+        )
+
+
 def _check_pyproject(root: Path, findings: list[str]) -> None:
     path = root / "pyproject.toml"
     text = _read_text(path, root, findings)
@@ -1123,6 +1184,7 @@ def check(root: Path) -> list[str]:
     _check_ci(resolved_root, findings)
     _check_publish(resolved_root, findings)
     _check_registry_publish(resolved_root, findings)
+    _check_qodana(resolved_root, findings)
     _check_support_surfaces(resolved_root, findings)
     return sorted(set(findings))
 
