@@ -34,6 +34,12 @@ EXPECTED_TOOLS = {
     "fcpxml_change_speed",
     "fcpxml_assign_role",
     "fcpxml_add_title",
+    "fcpxml_set_clip_transform",
+    "fcpxml_add_video_effect",
+    "fcpxml_add_connected_title",
+    "fcpxml_add_connected_generator",
+    "fcpxml_add_transform_keyframes",
+    "fcpxml_add_transition_template",
     "fcpxml_add_audio",
     "fcpxml_create_project",
     "fcpxml_create_timeline",
@@ -56,6 +62,8 @@ EXPECTED_TOOLS = {
     "fcpxml_check_safe_zones",
     "fcpxml_check_duration",
     "fcp_list_motion_templates",
+    "fcp_search_motion_templates",
+    "fcp_inspect_motion_template",
     "fcp_list_share_destinations",
     "fcp_discover_effects",
     "fcpxml_list_templates",
@@ -111,10 +119,10 @@ EXPECTED_TOOLS = {
 }
 
 
-def test_full_catalog_is_exactly_97_annotated_tools():
+def test_full_catalog_is_exactly_105_annotated_tools():
     tools = asyncio.run(mcp.list_tools())
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
-    assert len(tools) == 97
+    assert len(tools) == 105
     assert all(tool.annotations is not None for tool in tools)
 
 
@@ -140,7 +148,7 @@ def test_real_no_environment_default_exposes_workflow_safe_catalog():
     )
     catalog = json.loads(completed.stdout)
 
-    assert len(catalog["tools"]) == 34
+    assert len(catalog["tools"]) == 36
     assert catalog["tools"][0] == "fcp_doctor"
     assert catalog["tools"][-1] == "fcpxml_workflow_cancel"
     assert "fcpxml_add_marker" not in catalog["tools"]

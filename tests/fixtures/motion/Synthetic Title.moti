@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE ozxmlscene><ozml version="5.13">
+<!-- Hand-written synthetic Motion title for fcp-mcp tests. -->
+<factory id="1" uuid="00000000000000000000000000000001"><description>Project</description></factory>
+<factory id="16" uuid="00000000000000000000000000000016"><description>Text</description></factory>
+<template><theme>Synthetic</theme></template>
+<build/>
+<description/>
+<scene>
+	<sceneSettings><width>1080</width><height>1920</height><duration>150</duration><frameRate>30</frameRate></sceneSettings>
+	<publishSettings>
+		<version>2</version>
+		<target object="30010" channel="./2/369" name="Headline"/>
+		<target object="30010" channel="./2/83" name="Font"/>
+		<target object="30020" channel="./3" name="Size"/>
+	</publishSettings>
+	<scenenode name="Project" id="30000" factoryID="1" version="5"/>
+	<layer name="Main" id="30001">
+		<scenenode name="Headline Text" id="30010" factoryID="16" version="5">
+			<style name="Style" id="30020" factoryID="1">
+				<parameter name="Size" id="3" flags="0" default="48" value="96"/>
+			</style>
+			<parameter name="Object" id="2" flags="0">
+				<parameter name="Text" id="369" flags="0"><text>Your Headline</text></parameter>
+				<parameter name="Font" id="83" flags="0"><font>Helvetica-Bold</font><defaultFont>Helvetica</defaultFont></parameter>
+			</parameter>
+		</scenenode>
+	</layer>
+</scene>
+</ozml>

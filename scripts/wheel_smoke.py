@@ -20,10 +20,10 @@ from mcp.client.stdio import stdio_client
 
 EXPECTED_VERSION = "0.3.0"
 PROFILE_COUNTS = {
-    "inspect": (30, 2, 0),
-    "workflow": (34, 3, 3),
-    "edit": (76, 5, 3),
-    "full": (97, 5, 3),
+    "inspect": (32, 2, 0),
+    "workflow": (36, 3, 3),
+    "edit": (84, 5, 3),
+    "full": (105, 5, 3),
 }
 SOURCE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <fcpxml version="1.11"><resources>

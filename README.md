@@ -47,6 +47,9 @@ fcp-mcp/
 │   ├── observability.py         # text/JSON transaction events
 │   ├── server.py                # MCP v2 entry and profile-selected handlers
 │   ├── tool_metadata.py         # MCP safety annotation presets
+│   ├── motion/
+│   │   ├── library.py           # Motion template discovery and FCPXML uids
+│   │   └── ozml.py              # read-only Motion template parameter inspection
 │   ├── automation/
 │   │   └── osascript.py         # argv-isolated AppleScript/JXA runner
 │   ├── security/
@@ -59,6 +62,7 @@ fcp-mcp/
 │   │   ├── analysis.py          # pacing, flash frames, gaps, duplicates
 │   │   ├── validator.py         # DTD-style structural validation
 │   │   ├── generator.py         # programmatic project/timeline creation
+│   │   ├── composition.py       # transforms, filters, connected clips, keyframes
 │   │   ├── puppet.py            # character puppet system
 │   │   ├── diff.py              # timeline A/B comparison
 │   │   └── transaction.py       # validated atomic FCPXML commits
@@ -70,6 +74,7 @@ fcp-mcp/
 │   └── utils/
 │       ├── atomic_write.py       # backup, replace, rollback
 │       ├── safe_xml.py          # defusedxml hardening
+│       ├── apps.py              # find Final Cut Pro/Motion/Compressor by bundle id
 │       └── paths.py             # trusted system path helpers
 ├── tests/                       # complete unit + contract suite
 ├── scripts/                     # docs, coverage, and wheel gates
@@ -180,30 +185,30 @@ reviewable.
 
 | Profile | Tools | Prompts | Resources | Purpose |
 |---|---:|---:|---:|---|
-| `inspect` | 30 | 2 | 0 | Offline inspection and diagnostics |
-| `workflow` (default) | 34 | 3 | 3 | Reviewable transactional FCPXML edits |
-| `edit` | 76 | 5 | 3 | Direct offline mutation, import preparation, and workflows |
-| `full` | 97 | 5 | 3 | All offline tools and opt-in live FCP, media, and Compressor tools |
+| `inspect` | 32 | 2 | 0 | Offline inspection and diagnostics |
+| `workflow` (default) | 36 | 3 | 3 | Reviewable transactional FCPXML edits |
+| `edit` | 84 | 5 | 3 | Direct offline mutation, import preparation, and workflows |
+| `full` | 105 | 5 | 3 | All offline tools and opt-in live FCP, media, and Compressor tools |
 
-The 97 tools include the `youtube-mcp.materialized-clip-plan/v1` provenance
+The 105 tools include the `youtube-mcp.materialized-clip-plan/v1` provenance
 adapter, `fcpxml_generate_from_clip_plan`, in `edit` and `full` only. Live FCP
 control remains independently disabled unless `FCP_MCP_ENABLE_LIVE_CONTROL=1`;
 choosing `full` does not grant that authority.
 
-## Available Tools (97 in `full`)
+## Available Tools (105 in `full`)
 
-The full catalog combines 96 domain tools across 14 functional categories with
+The full catalog combines 104 domain tools across 14 functional categories with
 `fcp_doctor`.
 
 | Category | Count | What it does |
 |---|---:|---|
 | **inspect** | 8 | Parse, list clips/markers/effects/roles, analyze pacing, timeline stats, A/B diff |
 | **qc** | 10 | Flash frames, gaps, duplicates, media links, frame rates, audio levels, safe zones, duration, structural validation, aggregate QC report |
-| **edit** | 12 | Markers, keywords, titles, audio, transitions, trim, split, delete, reorder, speed, role assign, reformat |
+| **edit** | 18 | Markers, keywords, titles, audio, transitions (including any Motion transition template), trim, split, delete, reorder, speed, role assign, reformat, plus composition: clip transforms, video effects, connected titles/generators, transform keyframes |
 | **heal** | 3 | Fix flash frames, fill gaps, remove silence |
 | **batch** | 4 | Markers, rename, role assign, apply transition across many clips |
 | **generate** | 5 | New project/timeline, rough cuts, montages, and provenance-preserving clip-plan FCPXML |
-| **templates** | 3 | List and save FCPXML templates; `fcpxml_apply_template` remains `unsupported_contract` in v0.3.0 |
+| **templates** | 5 | List and save FCPXML templates; search installed Motion templates and inspect their published parameters; `fcpxml_apply_template` remains `unsupported_contract` in v0.3.0 |
 | **io** | 5 | Import SRT/EDL, export EDL + DaVinci Resolve XML + Premiere FCP7 XMEML |
 | **live** | 20 | AppleScript-backed library/events/projects, playback, menu/keyboard, share, and discovery |
 | **import bridge** | 3 | Validated destination-bound XML preparation, one approved native request, and metadata reconciliation |

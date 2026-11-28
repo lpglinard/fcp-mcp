@@ -36,7 +36,7 @@ The JSON response includes `sample_path` and `next_prompt`. Use its
 
 ## 3. Configure a tested stdio client
 
-The default `workflow` profile exposes 34 tools and preserves the inspect,
+The default `workflow` profile exposes 36 tools and preserves the inspect,
 prepare, review, hash approval, commit sequence. For Claude Code, install the
 following user-scoped stdio configuration:
 

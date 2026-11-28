@@ -10,6 +10,7 @@ from pathlib import Path
 from fcp_mcp.config import RuntimeConfig
 from fcp_mcp.contracts import DoctorCheck, DoctorReport, FCPMCPError
 from fcp_mcp.media.ffprobe import _find_ffmpeg, _find_ffprobe, _run_checked
+from fcp_mcp.utils.apps import FINAL_CUT_PRO_BUNDLE_IDS, find_final_cut_pro
 from fcp_mcp.utils.paths import compressor_binary
 from fcp_mcp.version import distribution_version, package_version
 
@@ -95,21 +96,27 @@ def _process_running(name: str) -> bool:
 
 
 def _fcp_check() -> tuple[DoctorCheck, bool, bool]:
-    application = Path("/Applications/Final Cut Pro.app")
-    installed = application.is_dir()
-    running = _process_running("Final Cut Pro") if installed else False
-    if not installed:
+    app = find_final_cut_pro()
+    installed = app is not None and app.path.is_dir()
+    if app is None or not installed:
         return (
             DoctorCheck(
                 id="final_cut_pro",
                 status="warn",
-                summary="Final Cut Pro is not installed in /Applications",
-                details={"path": str(application), "running": False},
+                summary=(
+                    "Final Cut Pro is not installed in /Applications or ~/Applications"
+                ),
+                details={
+                    "bundle_ids": list(FINAL_CUT_PRO_BUNDLE_IDS),
+                    "running": False,
+                },
                 remediation="Install Final Cut Pro to use live-control tools",
             ),
-            installed,
-            running,
+            False,
+            False,
         )
+    application = app.path
+    running = _process_running(app.executable)
     return (
         DoctorCheck(
             id="final_cut_pro",
@@ -119,7 +126,12 @@ def _fcp_check() -> tuple[DoctorCheck, bool, bool]:
                 if running
                 else "Final Cut Pro is installed but not running"
             ),
-            details={"path": str(application), "running": running},
+            details={
+                "path": str(application),
+                "bundle_id": app.bundle_id,
+                "version": app.version,
+                "running": running,
+            },
         ),
         installed,
         running,

@@ -3,6 +3,68 @@
 All notable changes to fcp-mcp are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/).
 
+## Unreleased
+
+### Added
+
+- Composition tools in the `edit` and `full` profiles:
+  `fcpxml_set_clip_transform`, `fcpxml_add_video_effect`,
+  `fcpxml_add_connected_title`, `fcpxml_add_connected_generator`, and
+  `fcpxml_add_transform_keyframes`. They set static transforms, apply
+  `filter-video` effects (reusing `<effect>` resources by exact uid), connect
+  titles and generators at a sequence time and lane with parent-local
+  offsets, and write `keyframeAnimation` transform keyframes. Every insertion
+  follows Apple's DTD child order and each commit is re-read and verified.
+- WORKFLOWS.md recipe 9: vertical split-screen composition.
+- `fcp_search_motion_templates` (all profiles) filters installed Motion
+  templates by text, category, and source, with a result cap.
+- `fcp_inspect_motion_template` (all profiles) reads a template's published
+  parameters (display name, FCPXML `param` key with a confidence flag, kind,
+  default, value, range, menu options), text layers, embedded FxPlug plug-in UUIDs, and scene
+  size/duration, without modifying the template. Only files inside a Motion
+  template folder are read.
+- `fcpxml_add_transition_template` (`edit`/`full`) inserts a transition from
+  any Motion transition template or effect uid as
+  `<transition><filter-video ref=…/>` (the DTD form), centred on the cut,
+  reusing the `<effect>` resource by uid.
+- `params_json` of the composition tools accepts
+  `{"<key>": {"name": "…", "value": "…"}}` so parameter keys from
+  `fcp_inspect_motion_template` round-trip with their display names, and
+  `fcpxml_add_connected_title` with `text=""` omits `<text>` so a template's
+  published text parameter can carry the text.
+- WORKFLOWS.md recipe 10: inspect a Motion template and apply it with
+  parameters.
+
+### Fixed
+
+- `fcp_list_motion_templates` now lists titles, effects, transitions and
+  generators (it previously found only `.motn` files) from the user Motion
+  Templates folder, including third-party folders without `.localized`, and
+  from Final Cut Pro's built-in template roots. Records keep `category`,
+  `name` and `path` and add `uid` (the FCPXML effect uid: `.../…` for
+  built-ins, `~/…` relative to the Motion Templates folder for user
+  templates), `extension`, `source`, `root`, `group`, `collection`, and
+  preview image paths.
+- `fcp_doctor`, the Apple DTD release gate, and Compressor discovery find
+  Final Cut Pro and Compressor by bundle id (`com.apple.FinalCut`,
+  `com.apple.FinalCutApp`, `com.apple.FinalCutTrial`; `com.apple.Compressor`,
+  `com.apple.CompressorApp`) instead of a fixed `/Applications/... .app`
+  path, so editions such as "Final Cut Pro Creator Studio.app" are detected.
+  The executed Compressor binary is only taken from `/Applications`.
+- The FCPXML parser reads an asset's media URL from its
+  `<media-rep kind="original-media">` child (FCPXML 1.9+) when the legacy
+  `src` attribute is absent, so validation and QC no longer warn that such
+  assets have no source path, and media-link checks and exports see them.
+- `fcpxml_reformat` now changes the primary sequence's format instead of the
+  first `<format>` in the file. When that format is shared with assets, it is
+  cloned for the sequence, so source media keeps its real frame size instead
+  of being re-described as the target aspect ratio.
+
+### Changed
+
+- Profile counts are `inspect=32`, `workflow=36`, `edit=84`, and `full=105`
+  tools.
+
 ## v0.3.0 — 2026-08-09 — Transactional AI piloting
 
 ### Added

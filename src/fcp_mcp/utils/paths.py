@@ -26,7 +26,16 @@ def compressor_settings_dir() -> Path:
 
 
 def compressor_binary() -> Path:
-    """Compressor CLI binary."""
+    """Compressor CLI binary.
+
+    Discovered by bundle id in ``/Applications`` only (this path is
+    executed); falls back to the classic ``Compressor.app`` location.
+    """
+    from .apps import SYSTEM_APPLICATIONS, find_compressor
+
+    app = find_compressor(search_roots=(SYSTEM_APPLICATIONS,))
+    if app is not None:
+        return app.executable_path
     return Path("/Applications/Compressor.app/Contents/MacOS/Compressor")
 
 

@@ -22,7 +22,7 @@ def test_tool_result_gate_script_checks_the_full_catalog():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "97 tools checked; 0 legacy result schemas\n"
+    assert result.stdout == "105 tools checked; 0 legacy result schemas\n"
 
 
 def test_full_catalog_has_no_legacy_scalar_result_schema():
@@ -30,7 +30,7 @@ def test_full_catalog_has_no_legacy_scalar_result_schema():
 
     tools = asyncio.run(mcp.list_tools())
 
-    assert len(tools) == 97
+    assert len(tools) == 105
     assert asyncio.run(failures(mcp)) == []
 
 
@@ -78,7 +78,7 @@ def _typed_schema():
     }
 
 
-def test_gate_rejects_catalog_count_other_than_97():
+def test_gate_rejects_catalog_count_other_than_105():
     from scripts.check_tool_results import failures
 
     @dataclass
@@ -90,11 +90,11 @@ def test_gate_rejects_catalog_count_other_than_97():
         async def list_tools(self):
             return [
                 Tool(f"tool_{index}", _typed_schema())
-                for index in range(96)
+                for index in range(104)
             ]
 
     assert asyncio.run(failures(FakeServer())) == [
-        "catalog: expected 97 tools, got 96"
+        "catalog: expected 105 tools, got 104"
     ]
 
 
@@ -224,9 +224,9 @@ def test_script_main_returns_nonzero_for_catalog_or_schema_failure(
     import scripts.check_tool_results as gate
 
     async def fake_check():
-        return 96, ["catalog: expected 97 tools, got 96"]
+        return 104, ["catalog: expected 105 tools, got 104"]
 
     monkeypatch.setattr(gate, "_check", fake_check)
 
     assert gate.main() == 1
-    assert capsys.readouterr().out == "catalog: expected 97 tools, got 96\n"
+    assert capsys.readouterr().out == "catalog: expected 105 tools, got 104\n"

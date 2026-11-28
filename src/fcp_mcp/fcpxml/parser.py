@@ -122,11 +122,27 @@ class FCPXMLParser:
             color_space=el.get("colorSpace", ""),
         )
 
+    @staticmethod
+    def _asset_source(el: ET.Element) -> str:
+        """Return an asset's media URL.
+
+        FCPXML 1.9 and later store it on a ``media-rep`` child (preferring
+        ``kind="original-media"``); earlier versions use the ``src`` attribute,
+        which wins when both are present.
+        """
+        if el.get("src"):
+            return el.get("src", "")
+        reps = [rep for rep in el.findall("media-rep") if rep.get("src")]
+        for rep in reps:
+            if rep.get("kind", "original-media") == "original-media":
+                return rep.get("src", "")
+        return reps[0].get("src", "") if reps else ""
+
     def _parse_asset(self, el: ET.Element) -> Asset:
         """Parse an asset resource."""
         return Asset(
             id=el.get("id", ""),
-            src=el.get("src", ""),
+            src=self._asset_source(el),
             name=el.get("name", ""),
             start=RationalTime.from_fcpxml(el.get("start", "0s")),
             duration=RationalTime.from_fcpxml(el.get("duration", "0s")),

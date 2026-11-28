@@ -26,6 +26,7 @@ from .config import RuntimeConfig
 from .contracts import DoctorReport, ErrorCode, FCPMCPError
 from .diagnostics import collect_doctor
 from .fcp_control.import_bridge import ImportBridge
+from .fcpxml import composition
 from .fcpxml.analysis import (
     analyze_pacing,
     analyze_timeline_stats,
@@ -74,6 +75,10 @@ from .result_models.fcpxml import (
     ClipMutationRecord,
     ClipMutationResult,
     ClipRecord,
+    ClipTransformMutationResult,
+    ClipTransformRecord,
+    ConnectedElementMutationResult,
+    ConnectedElementRecord,
     DiffChangeRecord,
     DiffCountsRecord,
     DuplicateDetectionResult,
@@ -102,8 +107,13 @@ from .result_models.fcpxml import (
     MarkerMutationResult,
     MarkerRecord,
     MediaLinkCheckResult,
+    MotionTemplateInspectionResult,
     MotionTemplateListResult,
+    MotionTemplateParameterRecord,
+    MotionTemplatePluginRecord,
     MotionTemplateRecord,
+    MotionTemplateSearchResult,
+    MotionTemplateTextLayerRecord,
     PacingAnalysisResult,
     PacingHistogram,
     PacingRecord,
@@ -119,15 +129,23 @@ from .result_models.fcpxml import (
     ShareDestinationListResult,
     SubtitleImportResult,
     TemplateListResult,
+    TemplateParamRecord,
     TemplateSaveResult,
     TimelineElementMutationRecord,
     TimelineElementMutationResult,
     TimelineStatsResult,
     TransactionReceiptResult,
+    TransformAnimationRecord,
+    TransformKeyframeMutationResult,
+    TransformKeyframeRecord,
     TransitionBatchMutationResult,
     TransitionMutationRecord,
     TransitionMutationResult,
+    TransitionTemplateMutationResult,
+    TransitionTemplateRecord,
     UnsupportedToolResult,
+    VideoEffectMutationResult,
+    VideoEffectRecord,
 )
 from .result_models.import_bridge import ImportBridgeResult, PreparedImportResult
 from .result_models.live import (
@@ -1920,7 +1938,7 @@ def fcpxml_diff(
 
 
 # ============================================================================
-# Category 3: FCPXML Editing (12 tools)
+# Category 3: FCPXML Editing (18 tools)
 # ============================================================================
 
 @TOOLS.tool(
@@ -2952,6 +2970,877 @@ def fcpxml_add_audio(
     )
 
 
+def _finite(value: float, label: str) -> float:
+    if isinstance(value, bool) or not isfinite(value):
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            f"{label} must be a finite number: {value}",
+        )
+    return float(value)
+
+
+def _composition_params(params_json: str) -> list[composition.ParamSpec]:
+    return composition.parse_params(
+        _load_json_object(params_json or "{}", "params_json"),
+        "params_json",
+    )
+
+
+def _parameter_records(element: ET.Element) -> list[TemplateParamRecord]:
+    return [
+        TemplateParamRecord(name=spec.name, key=spec.key, value=spec.value)
+        for spec in composition.param_specs_of(element)
+    ]
+
+
+def _committed_clip(
+    root: ET.Element,
+    name: str,
+    occurrence: int,
+) -> ET.Element:
+    return _committed_named(root, name, occurrence, composition.VISUAL_CLIP_TAGS)
+
+
+def _committed_named(
+    root: ET.Element,
+    name: str,
+    occurrence: int,
+    supported: Collection[str],
+) -> ET.Element:
+    try:
+        return composition.find_named_clip(
+            root, name, occurrence=occurrence, supported=supported
+        )
+    except FCPMCPError as error:
+        raise RuntimeError(
+            f"Committed FCPXML is missing expected clip '{name}'"
+        ) from error
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=ClipTransformMutationResult,
+)
+def fcpxml_set_clip_transform(
+    path: str,
+    clip_name: str,
+    position_x: float = 0.0,
+    position_y: float = 0.0,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    rotation: float = 0.0,
+    anchor_x: float = 0.0,
+    anchor_y: float = 0.0,
+    occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[ClipTransformMutationResult]:
+    """Set (add or replace) the static Transform of a clip (<adjust-transform>).
+
+    Units follow Apple's FCPXML reference: position and anchor are "x y"
+    offsets from the frame centre as a percentage of the project frame
+    HEIGHT (positive x = right, positive y = up). In a 1080x1920 project,
+    position_y=-25 moves the clip centre 480 px down; in 1920x1080,
+    position_x=10 moves it 108 px right. Anchor is assumed to use the same
+    units. Scale is a multiplier (1 = 100%) applied after Final Cut's spatial
+    conform (default "Fit"). Rotation is in degrees (counter-clockwise
+    positive, as in the inspector). Replacing a transform discards its
+    keyframed params (reported in the result).
+
+    Args:
+        path: Path to .fcpxml file
+        clip_name: Name of an asset-clip, clip, ref-clip, sync-clip, title, or video (mc-clip is not transformable in FCPXML)
+        position_x: Horizontal offset from centre, % of frame height
+        position_y: Vertical offset from centre, % of frame height (up is positive)
+        scale_x: Horizontal scale multiplier
+        scale_y: Vertical scale multiplier
+        rotation: Rotation in degrees
+        anchor_x: Anchor point x, % of frame height
+        anchor_y: Anchor point y, % of frame height
+        occurrence: 1-based match index when several clips share clip_name (document order)
+        output_path: Output file path
+    """
+    position = (_finite(position_x, "position_x"), _finite(position_y, "position_y"))
+    scale = (_finite(scale_x, "scale_x"), _finite(scale_y, "scale_y"))
+    angle = _finite(rotation, "rotation")
+    anchor = (_finite(anchor_x, "anchor_x"), _finite(anchor_y, "anchor_y"))
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    clip = composition.find_named_clip(mod.root, clip_name, occurrence=occurrence)
+    transform, previous = composition.set_transform(
+        clip, position=position, scale=scale, rotation=angle, anchor=anchor
+    )
+    expected = dict(transform.attrib)
+    discarded = (
+        [param.get("name", "") for param in previous.findall("param")]
+        if previous is not None
+        else []
+    )
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    committed = _committed_clip(root, clip_name, occurrence)
+    committed_transforms = committed.findall("adjust-transform")
+    if (
+        len(committed_transforms) != 1
+        or committed_transforms[0].attrib != expected
+        or committed_transforms[0].findall("param")
+    ):
+        raise RuntimeError(
+            "Committed FCPXML is missing the requested transform"
+        )
+    committed_transform = committed_transforms[0]
+    return ToolOutcome(
+        text=(
+            f"Transform set on '{clip_name}'. Saved to: {receipt.destination}"
+        ),
+        structured=ClipTransformMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            transform=ClipTransformRecord(
+                clip_name=clip_name,
+                element_type=committed.tag,
+                occurrence=occurrence,
+                position=committed_transform.get("position", ""),
+                scale=committed_transform.get("scale", ""),
+                rotation=committed_transform.get("rotation", ""),
+                anchor=committed_transform.get("anchor", ""),
+                replaced=previous is not None,
+                discarded_animated_params=discarded,
+            ),
+        ),
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=VideoEffectMutationResult,
+)
+def fcpxml_add_video_effect(
+    path: str,
+    clip_name: str,
+    effect_name: str,
+    effect_uid: str,
+    params_json: str = "{}",
+    occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[VideoEffectMutationResult]:
+    """Apply a video effect to a clip (<filter-video> referencing an <effect> resource).
+
+    The <effect> resource is reused when one with exactly effect_uid exists;
+    otherwise it is added. effect_uid is passed through verbatim. Get it
+    from fcp_search_motion_templates / fcp_list_motion_templates (Motion
+    templates) or from an FCPXML Final Cut exported (fcpxml_list_effects).
+    Forms Final Cut uses: built-in templates ".../Effects.localized/<...>.moef";
+    templates in the user Motion Templates folder "~/Effects.localized/<...>.moef"
+    (relative to that folder; third-party FxPlug plug-ins such as film looks
+    usually ship this way, wrapping the plug-in); FxPlug filters used
+    directly "FxPlug:<UUID>"; native filters such as "FFGaussianBlur".
+    fcpxml_prepare_import accepts only factory ".../" uids (with
+    .moti/.moef/.motr/.mopn suffixes) or native uids without "/" or ":";
+    import other files with File > Import > XML.
+
+    Args:
+        path: Path to .fcpxml file
+        clip_name: Name of an asset-clip, clip, ref-clip, sync-clip, title, or video
+        effect_name: Display name for the effect resource and filter
+        effect_uid: Effect uid exactly as Final Cut writes it
+        params_json: JSON object of parameter key -> value, or key -> {"value": ..., "name": ...} (keys from fcp_inspect_motion_template)
+        occurrence: 1-based match index when several clips share clip_name (document order)
+        output_path: Output file path
+    """
+    params = _composition_params(params_json)
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    clip = composition.find_named_clip(mod.root, clip_name, occurrence=occurrence)
+    effect, created = composition.ensure_effect_resource(
+        mod.root, effect_name, effect_uid
+    )
+    effect_ref = effect.get("id", "")
+    composition.add_video_filter(clip, effect, name=effect_name, params=params)
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    committed = _committed_clip(root, clip_name, occurrence)
+    committed_effect = next(
+        (
+            candidate
+            for candidate in root.findall("resources/effect")
+            if candidate.get("id") == effect_ref
+            and candidate.get("uid") == effect_uid
+        ),
+        None,
+    )
+    filters = committed.findall("filter-video")
+    if (
+        committed_effect is None
+        or not filters
+        or filters[-1].get("ref") != effect_ref
+        or composition.param_specs_of(filters[-1]) != params
+    ):
+        raise RuntimeError(
+            "Committed FCPXML is missing the requested video effect"
+        )
+    return ToolOutcome(
+        text=(
+            f"Effect '{effect_name}' added to '{clip_name}'. "
+            f"Saved to: {receipt.destination}"
+        ),
+        structured=VideoEffectMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            effect=VideoEffectRecord(
+                clip_name=clip_name,
+                element_type=committed.tag,
+                occurrence=occurrence,
+                effect_ref=effect_ref,
+                effect_name=committed_effect.get("name", ""),
+                effect_uid=effect_uid,
+                resource_created=created,
+                filter_count=len(filters),
+                parameters=_parameter_records(filters[-1]),
+            ),
+        ),
+    )
+
+
+def _validate_lane(lane: int) -> int:
+    if isinstance(lane, bool) or not isinstance(lane, int) or lane == 0:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "lane must be a non-zero integer (positive = above, negative = below)",
+        )
+    return lane
+
+
+def _place_connected(
+    mod: FCPXMLModifier,
+    element: ET.Element,
+    *,
+    timeline_offset: str,
+    anchor_clip_name: str,
+    anchor_occurrence: int,
+) -> tuple[composition.ConnectionPoint, int]:
+    point = composition.resolve_connection_point(
+        mod.root,
+        _parse_time(timeline_offset, "timeline_offset"),
+        anchor_clip_name=anchor_clip_name,
+        anchor_occurrence=anchor_occurrence,
+    )
+    element.set("offset", point.local_offset.to_fcpxml())
+    composition.insert_in_dtd_order(point.parent, element)
+    parent_index = list(composition.primary_spine(mod.root)).index(point.parent)
+    return point, parent_index
+
+
+def _committed_connected(
+    root: ET.Element,
+    parent_index: int,
+    expected: ET.Element,
+) -> tuple[ET.Element, ET.Element]:
+    spine = composition.primary_spine(root)
+    children = list(spine)
+    if parent_index >= len(children):
+        raise RuntimeError("Committed FCPXML is missing the anchor clip")
+    parent = children[parent_index]
+    keys = ("ref", "name", "lane", "offset", "duration", "role")
+    committed = next(
+        (
+            candidate
+            for candidate in parent.findall(expected.tag)
+            if all(candidate.get(key) == expected.get(key) for key in keys)
+        ),
+        None,
+    )
+    if committed is None:
+        raise RuntimeError(
+            "Committed FCPXML is missing the connected element"
+        )
+    return parent, committed
+
+
+def _optional_position(
+    element: ET.Element,
+    position: tuple[float, float],
+    scale: tuple[float, float] = (1.0, 1.0),
+) -> None:
+    if position != (0.0, 0.0) or scale != (1.0, 1.0):
+        composition.set_transform(
+            element, position=position, scale=scale, rotation=0.0, anchor=(0.0, 0.0)
+        )
+
+
+def _connected_record(
+    kind: str,
+    committed: ET.Element,
+    parent: ET.Element,
+    point: composition.ConnectionPoint,
+    effect: ET.Element,
+    created: bool,
+    timeline_offset: str,
+) -> ConnectedElementRecord:
+    transform = committed.find("adjust-transform")
+    return ConnectedElementRecord(
+        kind=kind,
+        element_type=committed.tag,
+        name=committed.get("name", ""),
+        ref=committed.get("ref", ""),
+        effect_name=effect.get("name", ""),
+        effect_uid=effect.get("uid", ""),
+        resource_created=created,
+        parent_name=parent.get("name", ""),
+        parent_element_type=parent.tag,
+        parent_offset=point.parent_offset.to_fcpxml(),
+        parent_start=point.parent_start.to_fcpxml(),
+        timeline_offset=timeline_offset,
+        offset=committed.get("offset", ""),
+        duration=committed.get("duration", ""),
+        lane=int(committed.get("lane", "0")),
+        role=committed.get("role", ""),
+        parameters=_parameter_records(committed),
+        has_text_element=committed.find("text") is not None,
+        position=transform.get("position") if transform is not None else None,
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=ConnectedElementMutationResult,
+)
+def fcpxml_add_connected_title(
+    path: str,
+    text: str,
+    timeline_offset: str,
+    duration: str,
+    lane: int = 1,
+    anchor_clip_name: str = "",
+    title_name: str = "Basic Title",
+    title_uid: str = ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti",
+    font: str = "Helvetica",
+    font_size: float = 63.0,
+    font_face: str = "Bold",
+    font_color: str = "1 1 1 1",
+    alignment: str = "center",
+    position_x: float = 0.0,
+    position_y: float = 0.0,
+    params_json: str = "{}",
+    role: str = "Titles",
+    anchor_occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[ConnectedElementMutationResult]:
+    """Connect a title to the primary storyline at a timeline time and lane.
+
+    The title is anchored to the primary-storyline item covering
+    timeline_offset (or to anchor_clip_name). timeline_offset uses the same
+    time space as primary-storyline offsets (sequence time, including the
+    sequence tcStart). The written offset is in the parent's local time:
+    offset = parent.start + (timeline_offset - parent.offset). Retimed
+    parents (timeMap) are rejected. position_x/position_y add an
+    adjust-transform in % of frame height (see fcpxml_set_clip_transform).
+
+    Text is written as <text>/<text-style> with the font settings below.
+    For templates that publish their own text or style parameters, pass
+    them in params_json using keys from fcp_inspect_motion_template; set
+    text to "" to omit the <text> element entirely (the clip is then named
+    after title_name).
+
+    Args:
+        path: Path to .fcpxml file
+        text: Title text (also the clip name); "" omits the <text> element
+        timeline_offset: Sequence time where the title starts (FCPXML time)
+        duration: Title duration (FCPXML time)
+        lane: Non-zero lane; positive is above the storyline, negative below
+        anchor_clip_name: Optional primary-storyline clip to anchor to
+        title_name: Title effect resource name
+        title_uid: Title effect uid (Motion .moti template), reused when already present
+        font: Font family
+        font_size: Font size in points
+        font_face: Font face (e.g. Regular, Bold)
+        font_color: RGBA, space-separated 0-1 floats
+        alignment: left, center, right, or justified
+        position_x: Horizontal offset from centre, % of frame height
+        position_y: Vertical offset from centre, % of frame height (up is positive)
+        params_json: JSON object of parameter key -> value, or key -> {"value": ..., "name": ...}
+        role: Title role
+        anchor_occurrence: 1-based match index when several clips share anchor_clip_name
+        output_path: Output file path
+    """
+    _parse_positive_time(duration, "duration")
+    lane = _validate_lane(lane)
+    size = _finite(font_size, "font_size")
+    if size <= 0:
+        raise FCPMCPError(ErrorCode.INVALID_ARGUMENTS, "font_size must be positive")
+    if alignment not in composition.TEXT_ALIGNMENTS:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "alignment must be one of: " + ", ".join(composition.TEXT_ALIGNMENTS),
+        )
+    position = (_finite(position_x, "position_x"), _finite(position_y, "position_y"))
+    params = _composition_params(params_json)
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    effect, created = composition.ensure_effect_resource(
+        mod.root, title_name, title_uid
+    )
+
+    title_el = ET.Element("title", {
+        "ref": effect.get("id", ""),
+        "lane": str(lane),
+        "name": text or title_name,
+        "duration": duration,
+    })
+    if role:
+        title_el.set("role", role)
+    composition.append_params(title_el, params)
+    style_id = composition.unique_id(mod.root, "ts") if text else ""
+    if text:
+        text_el = ET.SubElement(title_el, "text")
+        ET.SubElement(text_el, "text-style", {"ref": style_id}).text = text
+        style_def = ET.SubElement(title_el, "text-style-def", {"id": style_id})
+        ET.SubElement(style_def, "text-style", {
+            "font": font,
+            "fontSize": composition.format_number(size),
+            "fontFace": font_face,
+            "fontColor": font_color,
+            "alignment": alignment,
+        })
+    _optional_position(title_el, position)
+    point, parent_index = _place_connected(
+        mod,
+        title_el,
+        timeline_offset=timeline_offset,
+        anchor_clip_name=anchor_clip_name,
+        anchor_occurrence=anchor_occurrence,
+    )
+    expected = ET.Element(title_el.tag, dict(title_el.attrib))
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    parent, committed = _committed_connected(root, parent_index, expected)
+    run = committed.find("text/text-style")
+    style_def_el = committed.find("text-style-def")
+    if text and (
+        run is None
+        or run.text != text
+        or run.get("ref") != style_id
+        or style_def_el is None
+        or style_def_el.get("id") != style_id
+    ):
+        raise RuntimeError("Committed FCPXML title is missing its text")
+    if not text and (run is not None or style_def_el is not None):
+        raise RuntimeError("Committed FCPXML title has unexpected text")
+    if composition.param_specs_of(committed) != params:
+        raise RuntimeError("Committed FCPXML title is missing its parameters")
+    committed_effect = next(
+        el for el in root.findall("resources/effect")
+        if el.get("id") == committed.get("ref")
+    )
+    return ToolOutcome(
+        text=(
+            f"Title '{text or title_name}' connected to '{parent.get('name', '')}' on lane "
+            f"{lane}. Saved to: {receipt.destination}"
+        ),
+        structured=ConnectedElementMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            element=_connected_record(
+                "title", committed, parent, point, committed_effect, created,
+                timeline_offset,
+            ),
+        ),
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=ConnectedElementMutationResult,
+)
+def fcpxml_add_connected_generator(
+    path: str,
+    generator_name: str,
+    generator_uid: str,
+    timeline_offset: str,
+    duration: str,
+    lane: int = 1,
+    anchor_clip_name: str = "",
+    params_json: str = "{}",
+    position_x: float = 0.0,
+    position_y: float = 0.0,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    role: str = "",
+    anchor_occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[ConnectedElementMutationResult]:
+    """Connect a generator (e.g. a Motion .motn template) at a timeline time and lane.
+
+    FCPXML represents generators as <video ref="..."> pointing to an
+    <effect> resource; the resource is reused when generator_uid already
+    exists. Placement and offset math match fcpxml_add_connected_title:
+    offset = parent.start + (timeline_offset - parent.offset), with
+    timeline_offset in sequence time. Position is % of frame height.
+
+    Args:
+        path: Path to .fcpxml file
+        generator_name: Generator display name (also the clip name)
+        generator_uid: Effect uid exactly as Final Cut writes it (e.g. ".../Generators.localized/<...>.motn")
+        timeline_offset: Sequence time where the generator starts (FCPXML time)
+        duration: Generator duration (FCPXML time)
+        lane: Non-zero lane; positive is above the storyline, negative below
+        anchor_clip_name: Optional primary-storyline clip to anchor to
+        params_json: JSON object of parameter key -> value, or key -> {"value": ..., "name": ...}
+        position_x: Horizontal offset from centre, % of frame height
+        position_y: Vertical offset from centre, % of frame height (up is positive)
+        scale_x: Horizontal scale multiplier
+        scale_y: Vertical scale multiplier
+        role: Optional video role
+        anchor_occurrence: 1-based match index when several clips share anchor_clip_name
+        output_path: Output file path
+    """
+    _parse_positive_time(duration, "duration")
+    lane = _validate_lane(lane)
+    position = (_finite(position_x, "position_x"), _finite(position_y, "position_y"))
+    scale = (_finite(scale_x, "scale_x"), _finite(scale_y, "scale_y"))
+    params = _composition_params(params_json)
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    effect, created = composition.ensure_effect_resource(
+        mod.root, generator_name, generator_uid
+    )
+    video_el = ET.Element("video", {
+        "ref": effect.get("id", ""),
+        "lane": str(lane),
+        "name": generator_name,
+        "duration": duration,
+    })
+    if role:
+        video_el.set("role", role)
+    composition.append_params(video_el, params)
+    _optional_position(video_el, position, scale)
+    point, parent_index = _place_connected(
+        mod,
+        video_el,
+        timeline_offset=timeline_offset,
+        anchor_clip_name=anchor_clip_name,
+        anchor_occurrence=anchor_occurrence,
+    )
+    expected = ET.Element(video_el.tag, dict(video_el.attrib))
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    parent, committed = _committed_connected(root, parent_index, expected)
+    if composition.param_specs_of(committed) != params:
+        raise RuntimeError(
+            "Committed FCPXML generator is missing its parameters"
+        )
+    committed_effect = next(
+        el for el in root.findall("resources/effect")
+        if el.get("id") == committed.get("ref")
+    )
+    return ToolOutcome(
+        text=(
+            f"Generator '{generator_name}' connected to "
+            f"'{parent.get('name', '')}' on lane {lane}. "
+            f"Saved to: {receipt.destination}"
+        ),
+        structured=ConnectedElementMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            element=_connected_record(
+                "generator", committed, parent, point, committed_effect,
+                created, timeline_offset,
+            ),
+        ),
+    )
+
+
+def _keyframe_specs(
+    param: str,
+    keyframes_json: str,
+    clip: ET.Element,
+) -> list[composition.KeyframeSpec]:
+    raw = _load_json_list(keyframes_json, "keyframes_json")
+    if not raw:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "keyframes_json must contain at least one keyframe",
+        )
+    start = RationalTime.from_fcpxml(clip.get("start") or "0s")
+    end = start + RationalTime.from_fcpxml(clip.get("duration") or "0s")
+    specs: list[composition.KeyframeSpec] = []
+    previous: RationalTime | None = None
+    for index, item in enumerate(raw):
+        label = f"keyframes_json[{index}]"
+        if not isinstance(item, dict) or "time" not in item or "value" not in item:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                f"{label} must be an object with time and value",
+            )
+        unknown = set(item) - {"time", "value", "interp", "curve"}
+        if unknown:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                f"{label} has unknown fields: {', '.join(sorted(unknown))}",
+            )
+        if not isinstance(item["time"], str):
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS, f"{label}.time must be an FCPXML time string"
+            )
+        time = _parse_time(item["time"], f"{label}.time")
+        if not start <= time <= end:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                f"{label}.time {item['time']} is outside the clip's local range "
+                f"{start.to_fcpxml()}..{end.to_fcpxml()} (times are clip-local: "
+                "the clip's first frame is its start attribute)",
+            )
+        if previous is not None and time <= previous:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                "keyframe times must be strictly increasing",
+            )
+        previous = time
+        interp = item.get("interp", "linear")
+        if interp not in composition.KEYFRAME_INTERPOLATIONS:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                f"{label}.interp must be one of: "
+                + ", ".join(composition.KEYFRAME_INTERPOLATIONS),
+            )
+        curve = item.get("curve")
+        if curve is not None and curve not in composition.KEYFRAME_CURVES:
+            raise FCPMCPError(
+                ErrorCode.INVALID_ARGUMENTS,
+                f"{label}.curve must be one of: "
+                + ", ".join(composition.KEYFRAME_CURVES),
+            )
+        specs.append(
+            composition.KeyframeSpec(
+                time=item["time"],
+                value=composition.parse_keyframe_value(param, item["value"]),
+                interp=interp,
+                curve=curve,
+            )
+        )
+    return specs
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=TransformKeyframeMutationResult,
+)
+def fcpxml_add_transform_keyframes(
+    path: str,
+    clip_name: str,
+    param: str,
+    keyframes_json: str,
+    occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[TransformKeyframeMutationResult]:
+    """Keyframe a Transform parameter (position, scale, rotation, or anchor) on a clip.
+
+    Writes <adjust-transform><param name=param><keyframeAnimation><keyframe/>
+    as in Apple's FCPXML Animation reference, creating an identity
+    adjust-transform when the clip has none and replacing any existing
+    animation of the same param. Keyframe times are in the clip's LOCAL
+    time: the clip's first frame is its start attribute (0s when absent), so
+    for a clip with start="3600s" the first frame is "3600s" (per the DTD's
+    local-timeline definition of start). Times outside start..start+duration
+    are rejected. Values use the units of
+    fcpxml_set_clip_transform (position/anchor in % of frame height).
+
+    Args:
+        path: Path to .fcpxml file
+        clip_name: Name of an asset-clip, clip, ref-clip, sync-clip, title, or video
+        param: position, scale, rotation, or anchor
+        keyframes_json: JSON array of {"time": "<FCPXML time, clip-local>", "value": "x y" | [x, y] | number (rotation), "interp"?: "linear|ease|easeIn|easeOut", "curve"?: "linear|smooth"}
+        occurrence: 1-based match index when several clips share clip_name (document order)
+        output_path: Output file path
+    """
+    if param not in composition.TRANSFORM_PARAMS:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "param must be one of: " + ", ".join(composition.TRANSFORM_PARAMS),
+        )
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    clip = composition.find_named_clip(mod.root, clip_name, occurrence=occurrence)
+    specs = _keyframe_specs(param, keyframes_json, clip)
+    transform, transform_created = composition.ensure_transform(clip)
+    _, replaced = composition.set_keyframed_param(transform, param, specs)
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    committed = _committed_clip(root, clip_name, occurrence)
+    committed_param = next(
+        (
+            candidate
+            for candidate in committed.findall("adjust-transform/param")
+            if candidate.get("name") == param
+        ),
+        None,
+    )
+    expected = [
+        {
+            "time": spec.time,
+            "value": spec.value,
+            "interp": spec.interp,
+            **({"curve": spec.curve} if spec.curve is not None else {}),
+        }
+        for spec in specs
+    ]
+    if committed_param is None or [
+        keyframe.attrib
+        for keyframe in committed_param.findall("keyframeAnimation/keyframe")
+    ] != expected:
+        raise RuntimeError(
+            "Committed FCPXML is missing the requested keyframes"
+        )
+    return ToolOutcome(
+        text=(
+            f"{len(specs)} {param} keyframes set on '{clip_name}'. "
+            f"Saved to: {receipt.destination}"
+        ),
+        structured=TransformKeyframeMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            animation=TransformAnimationRecord(
+                clip_name=clip_name,
+                element_type=committed.tag,
+                occurrence=occurrence,
+                param=param,
+                clip_start=committed.get("start") or "0s",
+                clip_duration=committed.get("duration", ""),
+                transform_created=transform_created,
+                replaced=replaced,
+                keyframes=[
+                    TransformKeyframeRecord(
+                        time=spec.time,
+                        value=spec.value,
+                        interp=spec.interp,
+                        curve=spec.curve,
+                    )
+                    for spec in specs
+                ],
+            ),
+        ),
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.OFFLINE_WRITE,
+    safety_hints=OFFLINE_WRITE,
+    result_model=TransitionTemplateMutationResult,
+)
+def fcpxml_add_transition_template(
+    path: str,
+    after_clip_name: str,
+    effect_name: str,
+    effect_uid: str,
+    duration: str = "30030/30000s",
+    params_json: str = "{}",
+    occurrence: int = 1,
+    output_path: str = "",
+) -> ToolOutcome[TransitionTemplateMutationResult]:
+    """Insert a transition from any Motion transition template or effect uid.
+
+    Writes <transition name offset duration><filter-video ref=effect/>, the
+    form Apple's DTD and transition reference define (the effect is named by
+    a filter-video child, not a ref attribute). The <effect> resource is
+    reused by exact uid. This tool centres the transition on the cut after
+    after_clip_name (offset = cut - duration/2) and requires it to fit within
+    half of each neighbouring clip; neighbouring clips are not changed, so
+    Final Cut needs media handles for the overlap. (fcpxml_add_transition
+    instead starts at the cut.)
+    Find uids with fcp_search_motion_templates(category="Transitions") and
+    parameter keys with fcp_inspect_motion_template.
+
+    Args:
+        path: Path to .fcpxml file
+        after_clip_name: Storyline clip the transition follows
+        effect_name: Transition name (also the effect resource name)
+        effect_uid: Effect uid exactly as Final Cut writes it (e.g. ".../Transitions.localized/<...>.motr" or "~/Transitions.localized/<...>.motr")
+        duration: Transition duration (FCPXML time)
+        params_json: JSON object of parameter key -> value, or key -> {"value": ..., "name": ...}
+        occurrence: 1-based match index when several clips share after_clip_name
+        output_path: Output file path
+    """
+    span = _parse_positive_time(duration, "duration")
+    params = _composition_params(params_json)
+    mod = FCPXMLModifier(_resolve_input(path, suffixes={".fcpxml"}))
+    clip = composition.find_named_clip(
+        mod.root,
+        after_clip_name,
+        occurrence=occurrence,
+        supported=composition.ANCHOR_PARENT_TAGS,
+    )
+    spine = composition.parent_of(mod.root, clip)
+    if spine is None or spine.tag != "spine":
+        raise FCPMCPError(
+            ErrorCode.UNSUPPORTED_CONTRACT,
+            f"Clip '{after_clip_name}' is not on a storyline spine",
+        )
+    placement = composition.place_transition(clip, spine, span)
+    effect, created = composition.ensure_effect_resource(
+        mod.root, effect_name, effect_uid
+    )
+    composition.build_transition(
+        placement, effect, name=effect_name, duration=duration, params=params
+    )
+    expected_offset = placement.offset.to_fcpxml()
+    effect_ref = effect.get("id", "")
+
+    receipt = _save_modifier_receipt(mod, output_path)
+    root = _committed_root(receipt)
+    committed_clip = _committed_named(
+        root, after_clip_name, occurrence, composition.ANCHOR_PARENT_TAGS
+    )
+    committed_spine = next(
+        (candidate for candidate in root.iter("spine") if committed_clip in list(candidate)),
+        None,
+    )
+    siblings = list(committed_spine) if committed_spine is not None else []
+    index = siblings.index(committed_clip) if committed_clip in siblings else -1
+    transition = siblings[index + 1] if 0 <= index < len(siblings) - 1 else None
+    filter_video = transition.find("filter-video") if transition is not None else None
+    if (
+        transition is None
+        or transition.tag != "transition"
+        or transition.get("offset") != expected_offset
+        or transition.get("duration") != duration
+        or filter_video is None
+        or filter_video.get("ref") != effect_ref
+        or composition.param_specs_of(filter_video) != params
+    ):
+        raise RuntimeError("Committed FCPXML is missing the added transition")
+    committed_effect = next(
+        el for el in root.findall("resources/effect") if el.get("id") == effect_ref
+    )
+    return ToolOutcome(
+        text=(
+            f"Transition '{effect_name}' added after '{after_clip_name}'. "
+            f"Saved to: {receipt.destination}"
+        ),
+        structured=TransitionTemplateMutationResult(
+            destination=_artifact_reference(receipt),
+            receipt=_receipt_result(receipt),
+            transition=TransitionTemplateRecord(
+                after_clip_name=after_clip_name,
+                next_clip_name=siblings[index + 2].get("name", "")
+                if index + 2 < len(siblings) else "",
+                name=transition.get("name", ""),
+                offset=expected_offset,
+                cut=placement.cut.to_fcpxml(),
+                duration=duration,
+                effect_ref=effect_ref,
+                effect_name=committed_effect.get("name", ""),
+                effect_uid=effect_uid,
+                resource_created=created,
+                parameters=_parameter_records(filter_video),
+            ),
+        ),
+    )
+
+
 # ============================================================================
 # Category 4: FCPXML Generation (8 tools)
 # ============================================================================
@@ -3459,18 +4348,60 @@ def fcpxml_reformat(
 
     source_version = mod.root.get("version", "")
 
-    # Update format
-    format_element = next(mod.root.iter("format"), None)
+    # Update the format of the primary sequence. When that format resource is
+    # shared with assets (or other elements), clone it first so the source
+    # media keeps its real frame size instead of being re-described as the
+    # target aspect ratio.
+    sequence_element = next(mod.root.iter("sequence"), None)
+    sequence_format_id = (
+        sequence_element.get("format", "") if sequence_element is not None else ""
+    )
+    format_element = None
+    if sequence_format_id:
+        format_element = next(
+            (
+                el
+                for el in mod.root.iter("format")
+                if el.get("id") == sequence_format_id
+            ),
+            None,
+        )
+    if format_element is None:
+        format_element = next(mod.root.iter("format"), None)
     if format_element is None:
         raise FCPMCPError(
             ErrorCode.TARGET_NOT_FOUND,
             "FCPXML format resource not found",
         )
-    for fmt_el in (format_element,):
-        fmt_el.set("width", str(target_width))
-        fmt_el.set("height", str(target_height))
-        fmt_el.set("name", target_format_name)
-        break
+    format_id = format_element.get("id", "")
+    shared = format_id and any(
+        el is not sequence_element and el.get("format") == format_id
+        for el in mod.root.iter()
+    )
+    if shared and sequence_element is not None:
+        used_ids = {el.get("id") for el in mod.root.iter() if el.get("id")}
+        numbers = [
+            int(value[1:])
+            for value in used_ids
+            if value.startswith("r") and value[1:].isdigit()
+        ]
+        new_id = f"r{max(numbers, default=0) + 1}"
+        while new_id in used_ids:
+            new_id = f"r{int(new_id[1:]) + 1}"
+        clone = ET.Element("format", dict(format_element.attrib))
+        clone.set("id", new_id)
+        resources = mod.root.find("resources")
+        if resources is None:
+            raise FCPMCPError(
+                ErrorCode.TARGET_NOT_FOUND,
+                "FCPXML resources element not found",
+            )
+        resources.insert(list(resources).index(format_element) + 1, clone)
+        sequence_element.set("format", new_id)
+        format_element = clone
+    format_element.set("width", str(target_width))
+    format_element.set("height", str(target_height))
+    format_element.set("name", target_format_name)
 
     target_version = ""
     committed_width = 0
@@ -3483,7 +4414,22 @@ def fcpxml_reformat(
         nonlocal committed_height
         nonlocal committed_name
         root = ET.parse(candidate).getroot()
-        candidate_format = next(root.iter("format"), None)
+        candidate_sequence = next(root.iter("sequence"), None)
+        candidate_format_id = (
+            candidate_sequence.get("format", "")
+            if candidate_sequence is not None
+            else ""
+        )
+        candidate_format = next(
+            (
+                el
+                for el in root.iter("format")
+                if candidate_format_id and el.get("id") == candidate_format_id
+            ),
+            None,
+        )
+        if candidate_format is None:
+            candidate_format = next(root.iter("format"), None)
         if candidate_format is None:
             _raise_validation_failure(
                 "Reformat candidate is missing its format resource"
@@ -4441,38 +5387,236 @@ def fcpxml_check_duration(
     result_model=MotionTemplateListResult,
 )
 def fcp_list_motion_templates() -> ToolOutcome[MotionTemplateListResult]:
-    """List installed Motion templates (titles, transitions, generators, effects)."""
-    from .utils.paths import motion_templates_dir
+    """List installed Motion templates (titles, effects, transitions, generators).
 
-    templates_dir = motion_templates_dir()
-    if not templates_dir.exists():
+    Scans the user Motion Templates folder and the built-in template roots
+    inside the installed Final Cut Pro bundle (found by bundle id, so any
+    edition name works). Each record carries the FCPXML uid to use for an
+    <effect> resource: built-ins use ".../<path below the built-in root>",
+    user templates use "~/<path below Motion Templates.localized>". The text
+    channel maps each category to its template names.
+    """
+    from .motion import library
+
+    roots = library.template_roots()
+    if not any(root.path.is_dir() for root in roots):
         raise FCPMCPError(
             ErrorCode.TARGET_NOT_FOUND,
-            f"Motion Templates directory not found: {templates_dir}",
+            "No Motion template folders found: "
+            + ", ".join(str(root.path) for root in roots),
         )
-
-    categories = {}
-    template_records = []
-    for category_dir in templates_dir.iterdir():
-        if not category_dir.is_dir():
-            continue
-        cat_name = category_dir.stem.replace(".localized", "")
-        templates = []
-        for template_dir in category_dir.rglob("*.motn"):
-            templates.append(template_dir.stem)
-            template_records.append(
-                MotionTemplateRecord(
-                    category=cat_name,
-                    name=template_dir.stem,
-                    path=str(template_dir),
-                )
-            )
-        if templates:
-            categories[cat_name] = templates
-
+    templates = library.list_templates(roots)
+    categories: dict[str, list[str]] = {}
+    for template in templates:
+        categories.setdefault(template.category, []).append(template.name)
     return ToolOutcome(
         text=json.dumps(categories, indent=2),
-        structured=MotionTemplateListResult(templates=template_records),
+        structured=MotionTemplateListResult(
+            templates=[_motion_template_record(template) for template in templates]
+        ),
+    )
+
+
+def _motion_template_record(template: Any) -> MotionTemplateRecord:
+    return MotionTemplateRecord(
+        category=template.category,
+        name=template.name,
+        path=str(template.path),
+        extension=template.extension,
+        uid=template.uid,
+        source=template.source,
+        root=template.root,
+        group=list(template.group),
+        collection=template.collection,
+        large_preview=str(template.large_preview) if template.large_preview else None,
+        small_preview=str(template.small_preview) if template.small_preview else None,
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.INSPECT,
+    safety_hints=OFFLINE_READ,
+    result_model=MotionTemplateSearchResult,
+)
+def fcp_search_motion_templates(
+    query: str = "",
+    category: str = "",
+    source: str = "",
+    limit: int = 50,
+) -> ToolOutcome[MotionTemplateSearchResult]:
+    """Search installed Motion templates by name, folder, category, or source.
+
+    Same records as fcp_list_motion_templates (including the FCPXML uid),
+    filtered and capped so results stay small.
+
+    Args:
+        query: Case-insensitive text matched against the name, folders, and uid (all words must match)
+        category: Titles, Effects, Transitions, or Generators (empty = all)
+        source: "user", "built-in", or empty for both
+        limit: Maximum records to return (the total match count is always reported)
+    """
+    from .motion import library
+
+    if category and category not in library.CATEGORY_EXTENSIONS:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "category must be one of: " + ", ".join(library.CATEGORY_EXTENSIONS),
+        )
+    if source not in {"", "user", "built-in"}:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            'source must be "user", "built-in", or empty',
+        )
+    if isinstance(limit, bool) or limit < 1:
+        raise FCPMCPError(ErrorCode.INVALID_ARGUMENTS, "limit must be a positive integer")
+    words = query.lower().split()
+    matches = [
+        template
+        for template in library.list_templates()
+        if (not category or template.category == category)
+        and (not source or template.source == source)
+        and all(
+            word in " ".join([template.name, *template.group, template.uid]).lower()
+            for word in words
+        )
+    ]
+    shown = matches[:limit]
+    return ToolOutcome(
+        text="\n".join(
+            [f"{len(matches)} templates match; showing {len(shown)}."]
+            + [f"{t.category}: {t.name} — {t.uid}" for t in shown]
+        ),
+        structured=MotionTemplateSearchResult(
+            total=len(matches),
+            truncated=len(matches) > len(shown),
+            templates=[_motion_template_record(template) for template in shown],
+        ),
+    )
+
+
+@TOOLS.tool(
+    tool_class=ToolClass.INSPECT,
+    safety_hints=OFFLINE_READ,
+    result_model=MotionTemplateInspectionResult,
+)
+def fcp_inspect_motion_template(
+    template: str,
+    max_parameters: int = 200,
+) -> ToolOutcome[MotionTemplateInspectionResult]:
+    """Read a Motion template's published parameters (never modifies it).
+
+    Each parameter carries the FCPXML <param key>:
+    "9999/<object id path>/<channel ids>", where 9999 is the template
+    document and the ids come from the template's layers/objects and
+    published channel. key_confidence is "confirmed_pattern" when the path
+    uses only layers, scene nodes and text styles (the form Final Cut stored
+    for Basic Title) and "unverified" when it runs through a filter (e.g. a
+    wrapped FxPlug), behavior, or the document root; check those in Final
+    Cut before relying on them. Pass keys to params_json of
+    fcpxml_add_video_effect, fcpxml_add_connected_title,
+    fcpxml_add_connected_generator, or fcpxml_add_transition_template as
+    {"<key>": {"name": "<name>", "value": "<value>"}}. Also returns text
+    layers (titles), embedded FxPlug plug-ins (name and UUID), and scene
+    size/duration.
+
+    Args:
+        template: Template uid (".../..." or "~/...") or file path inside a Motion template folder
+        max_parameters: Maximum parameters to return (the total is always reported)
+    """
+    from .motion import library, ozml
+
+    if isinstance(max_parameters, bool) or max_parameters < 1:
+        raise FCPMCPError(
+            ErrorCode.INVALID_ARGUMENTS,
+            "max_parameters must be a positive integer",
+        )
+    roots = library.template_roots()
+    resolved = library.resolve_template(template, roots)
+    if resolved is None:
+        raise FCPMCPError(
+            ErrorCode.TARGET_NOT_FOUND,
+            f"Motion template not found inside a template folder: {template}",
+        )
+    root, path = resolved
+    scanned_root = library.TemplateRoot(
+        source=root.source, path=root.path.resolve(), label=root.label
+    )
+    record = next(
+        (
+            candidate
+            for candidate in library.scan_root(scanned_root)
+            if candidate.path == path
+        ),
+        None,
+    )
+    if record is None:
+        raise FCPMCPError(
+            ErrorCode.UNSUPPORTED_CONTRACT,
+            f"File is not a template of its category folder: {path}",
+        )
+    try:
+        inspection = ozml.inspect_template(path, max_parameters=max_parameters)
+    except ozml.TemplateParseError as error:
+        raise FCPMCPError(ErrorCode.VALIDATION_FAILED, str(error)) from error
+    structured = MotionTemplateInspectionResult(
+        template=_motion_template_record(record),
+        ozml_version=inspection.ozml_version,
+        width=inspection.width,
+        height=inspection.height,
+        duration_frames=inspection.duration_frames,
+        frame_rate=inspection.frame_rate,
+        theme=inspection.theme,
+        parameters=[
+            MotionTemplateParameterRecord(
+                name=item.name,
+                key=item.key,
+                published_name=item.published_name,
+                object_id=item.object_id,
+                object_name=item.object_name,
+                channel=item.channel,
+                kind=item.kind,
+                default=item.default,
+                value=item.value,
+                minimum=item.minimum,
+                maximum=item.maximum,
+                options=list(item.options),
+                key_basis=item.key_basis,
+                key_confidence=item.key_confidence,
+            )
+            for item in inspection.parameters
+        ],
+        total_parameters=inspection.total_parameters,
+        unnamed_parameters=inspection.unnamed_parameters,
+        truncated=inspection.truncated,
+        text_layers=[
+            MotionTemplateTextLayerRecord(
+                name=layer.name,
+                object_id=layer.object_id,
+                object_key=layer.object_key,
+                text=layer.text,
+            )
+            for layer in inspection.text_layers
+        ],
+        plugins=[
+            MotionTemplatePluginRecord(
+                object_name=plugin.object_name,
+                plugin_name=plugin.plugin_name,
+                plugin_uuid=plugin.plugin_uuid,
+                plugin_version=plugin.plugin_version,
+            )
+            for plugin in inspection.plugins
+        ],
+    )
+    shown = len(structured.parameters)
+    return ToolOutcome(
+        text=(
+            f"{record.category.removesuffix('s')} "
+            f"'{record.name}' ({record.uid}): {shown} of "
+            f"{inspection.total_parameters} parameters, "
+            f"{len(structured.text_layers)} text layers, "
+            f"{len(structured.plugins)} plug-ins"
+        ),
+        structured=structured,
     )
 
 

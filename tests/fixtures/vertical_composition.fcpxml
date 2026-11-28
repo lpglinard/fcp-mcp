@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<!-- 9:16 project with a 16:9 talking-head clip used twice on the primary storyline. -->
+<fcpxml version="1.11">
+    <resources>
+        <format id="r1" name="FFVideoFormatRateUndefined" frameDuration="1/30s" width="1080" height="1920" colorSpace="1-1-1 (Rec. 709)"/>
+        <format id="r2" name="FFVideoFormat1080p30" frameDuration="1/30s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+        <asset id="r3" name="Talk" start="0s" duration="60s" hasVideo="1" hasAudio="1" format="r2" audioSources="1" audioChannels="2">
+            <media-rep kind="original-media" src="file:///Users/example/Movies/talk.mov"/>
+        </asset>
+        <effect id="r4" name="Gaussian Blur" uid="FFGaussianBlur"/>
+    </resources>
+    <library>
+        <event name="Shorts">
+            <project name="Vertical Split">
+                <sequence format="r1" duration="26s" tcStart="3600s" tcFormat="NDF">
+                    <spine>
+                        <asset-clip ref="r3" name="Talk" offset="3600s" start="10s" duration="10s" format="r2" audioRole="dialogue">
+                            <adjust-volume amount="-3dB"/>
+                            <marker start="12s" duration="1/30s" value="Hook"/>
+                        </asset-clip>
+                        <gap name="Gap" offset="3610s" start="3600s" duration="2s"/>
+                        <asset-clip ref="r3" name="Talk" offset="3612s" start="30s" duration="10s" format="r2" audioRole="dialogue">
+                            <filter-video ref="r4" name="Gaussian Blur"/>
+                        </asset-clip>
+                        <asset-clip ref="r3" name="Retimed" offset="3622s" start="0s" duration="4s" format="r2" audioRole="dialogue">
+                            <timeMap>
+                                <timept time="0s" value="0s" interp="smooth2"/>
+                                <timept time="4s" value="8s" interp="smooth2"/>
+                            </timeMap>
+                        </asset-clip>
+                    </spine>
+                </sequence>
+            </project>
+        </event>
+    </library>
+</fcpxml>

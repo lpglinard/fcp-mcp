@@ -18,7 +18,7 @@ def test_readme_leads_with_bounded_outcome_and_development_catalog():
     assert "trusted, local" in first_screen
     assert "human-approved" in first_screen
     assert "most capable" not in first_screen
-    assert "97 tools" in text
+    assert "105 tools" in text
     assert "93 tools" not in text
     assert "v0.3 release candidate" not in text.lower()
 

@@ -11,10 +11,23 @@ from pathlib import Path
 
 from lxml import etree
 
-DEFAULT_RESOURCES_DIR = Path(
+LEGACY_RESOURCES_DIR = Path(
     "/Applications/Final Cut Pro.app/Contents/Frameworks/"
     "Interchange.framework/Versions/A/Resources"
 )
+
+
+def _discover_resources_dir() -> Path:
+    """Locate the installed Final Cut Pro by bundle id (any edition/name)."""
+    try:
+        from fcp_mcp.utils.apps import final_cut_interchange_resources, find_final_cut_pro
+    except ImportError:
+        return LEGACY_RESOURCES_DIR
+    app = find_final_cut_pro()
+    return final_cut_interchange_resources(app) if app is not None else LEGACY_RESOURCES_DIR
+
+
+DEFAULT_RESOURCES_DIR = _discover_resources_dir()
 VERSION_PATTERN = re.compile(r"^\d+\.\d+$")
 
 

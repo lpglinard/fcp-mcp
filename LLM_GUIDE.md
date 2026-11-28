@@ -2,7 +2,7 @@
 
 MCP server giving you (Claude) professional-grade Final Cut Pro editing
 via FCPXML + AppleScript + ffprobe. The default `workflow` profile exposes
-34 tools, three prompts, and three workflow resources; `full` exposes 97
+36 tools, three prompts, and three workflow resources; `full` exposes 105
 tools across 14 categories and five prompts.
 Modified FCPXMLs are written alongside their input with a `_modified`
 suffix unless `output_path` is specified.
@@ -228,6 +228,36 @@ Multi-scene generation likewise takes serialized rig and scene arrays:
 
 For custom keyframe control, provide serialized rigs and animations to
 `puppet_animate`.
+
+## Composition (transforms, effects, connected clips)
+
+`fcpxml_set_clip_transform`, `fcpxml_add_video_effect`,
+`fcpxml_add_connected_title`, `fcpxml_add_connected_generator`, and
+`fcpxml_add_transform_keyframes` (`edit`/`full`) build layered compositions
+such as a 9:16 split screen (see WORKFLOWS.md recipe 9).
+
+- Position and anchor are percentages of the frame **height** from the
+  centre; positive y is up. Scale is a multiplier; rotation is degrees.
+- `timeline_offset` uses primary-storyline offsets (sequence time, including
+  `tcStart`). The written connected offset is parent-local:
+  `parent.start + (timeline_offset - parent.offset)`.
+- Keyframe times are clip-local: the clip's first frame is its `start`.
+- Effect, title, and generator uids are copied verbatim from a Final Cut
+  export; resources are reused by exact uid. Use `occurrence` /
+  `anchor_occurrence` when clip names repeat.
+
+## Motion templates
+
+- `fcp_search_motion_templates` / `fcp_list_motion_templates` return each
+  template's FCPXML `uid`: `.../<path>` for Final Cut built-ins and
+  `~/<path below Motion Templates.localized>` for user templates. Search is
+  capped; the list tool returns everything (over a thousand records with
+  built-ins).
+- `fcp_inspect_motion_template` returns published parameters with their
+  FCPXML `key` (`9999/<object ids>/<channel ids>`). Pass them to
+  `params_json` as `{"<key>": {"name": "<name>", "value": "<value>"}}`.
+- `fcpxml_add_transition_template` applies any transition uid; see
+  WORKFLOWS.md recipe 10.
 
 ## Media analysis (ffprobe + ffmpeg)
 

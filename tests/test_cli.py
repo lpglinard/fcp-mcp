@@ -104,7 +104,7 @@ def test_doctor_json_is_machine_readable(capsys, tmp_path, monkeypatch):
     assert code in {0, 1, 2}
     assert payload["schema_version"] == "1"
     assert payload["package_version"] == "0.3.0"
-    assert payload["tool_count"] == 97
+    assert payload["tool_count"] == 105
     assert payload["prompt_count"] == 5
     ledger = next(
         check for check in payload["checks"] if check["id"] == "workflow_ledger"
@@ -148,6 +148,8 @@ def test_doctor_uses_profile_registry_as_catalog_expectation(tmp_path):
         "fcp_doctor",
         "fcp_discover_effects",
         "fcp_list_motion_templates",
+        "fcp_search_motion_templates",
+        "fcp_inspect_motion_template",
         "fcp_list_share_destinations",
         "fcpxml_analyze_pacing",
         "fcpxml_check_audio_levels",
@@ -176,7 +178,7 @@ def test_doctor_uses_profile_registry_as_catalog_expectation(tmp_path):
         "media_scene_detect",
         "puppet_list_presets",
     }
-    assert payload["tool_count"] == 30
+    assert payload["tool_count"] == 32
     assert payload["prompt_count"] == 2
     assert catalog["status"] == "pass"
     assert catalog["details"]["profile"] == "inspect"
@@ -353,7 +355,7 @@ def test_server_main_builds_profile_override_without_mutating_environment(
     assert os.environ["FCP_MCP_PROFILE"] == "inspect"
     assert len(started) == 1
     assert "profile=edit" in started[0].instructions
-    assert len(asyncio.run(started[0].list_tools())) == 76
+    assert len(asyncio.run(started[0].list_tools())) == 84
 
 
 def test_invalid_option_uses_argparse_error(capsys):

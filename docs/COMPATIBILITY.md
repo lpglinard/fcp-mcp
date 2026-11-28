@@ -29,10 +29,10 @@ client matrix.
 
 | Profile | Tools | Intended boundary |
 |---|---:|---|
-| `inspect` | 30 | Offline inspection and diagnostics only. |
-| `workflow` (default) | 34 | Inspect, private prepare, semantic-diff review, hash approval, then commit. |
-| `edit` | 75 | Direct offline mutation plus workflow tools. |
-| `full` | 94 | Offline, media, and opt-in live-control catalog. The `youtube-mcp.materialized-clip-plan/v1` adapter is edit/full only. |
+| `inspect` | 32 | Offline inspection and diagnostics only. |
+| `workflow` (default) | 36 | Inspect, private prepare, semantic-diff review, hash approval, then commit. |
+| `edit` | 84 | Direct offline mutation plus workflow tools. |
+| `full` | 105 | Offline, media, and opt-in live-control catalog. The `youtube-mcp.materialized-clip-plan/v1` adapter is edit/full only. |
 
 `FCP_MCP_ENABLE_LIVE_CONTROL=1` is a separate opt-in gate. Selecting `full`
 does not enable live control, and no profile makes Final Cut Pro automation

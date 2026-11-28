@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE ozxmlscene><ozml version="5.13">
+<!-- Hand-written synthetic Motion effect for fcp-mcp tests. -->
+<factory id="1" uuid="00000000000000000000000000000001"><description>Project</description></factory>
+<factory id="2" uuid="00000000000000000000000000000002"><description>Group</description></factory>
+<factory id="3" uuid="00000000000000000000000000000003"><description>Filter</description></factory>
+<template><theme>Synthetic</theme><flags>1</flags></template>
+<build/>
+<description/>
+<scene>
+	<sceneSettings><width>1920</width><height>1080</height><duration>240</duration><frameRate>24</frameRate></sceneSettings>
+	<publishSettings>
+		<version>2</version>
+		<target object="20000" channel="./1/103" name="HDR Level"/>
+		<target object="20119" channel="./59" name="Basic"/>
+		<target object="20119" channel="./105" name="Mode"/>
+		<target object="20119" channel="./130" name=""/>
+		<target object="29999" channel="./1" name="Missing Object"/>
+	</publishSettings>
+	<scenenode name="Project" id="20000" factoryID="1" version="5">
+		<parameter name="Properties" id="1" flags="0">
+			<parameter name="HDR Level" id="103" flags="0" default="0.95" value="0.95"/>
+		</parameter>
+	</scenenode>
+	<layer name="Background" id="20003">
+		<scenenode name="Effect Source" id="20007" factoryID="2" version="5">
+			<filter name="Synthetic Glow" id="20119" factoryID="3" pluginUUID="00000000-0000-4000-8000-0000000000AA" pluginVersion="1" pluginName="Synthetic Glow">
+				<parameter name="Basic" id="59" flags="0">
+					<parameter name="Brightness" id="63" flags="0" default="100" value="80"/>
+					<parameter name="Size" id="60" flags="0">
+						<curve type="1" default="1" value="2"><min>0</min><max>10</max></curve>
+					</parameter>
+				</parameter>
+				<parameter name="Mode" id="105" flags="0" default="0" value="1">
+					<entry name="Soft" tag="0"/>
+					<entry name="Hard" tag="1"/>
+				</parameter>
+				<parameter name="" id="130" flags="0"><numberOfKeypoints>0</numberOfKeypoints><defaultVal>0</defaultVal><dataValue>AA==</dataValue></parameter>
+			</filter>
+		</scenenode>
+	</layer>
+</scene>
+</ozml>

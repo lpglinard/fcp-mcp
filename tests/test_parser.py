@@ -188,3 +188,116 @@ class TestParserEdgeCases:
     def test_file_not_found(self, parser: FCPXMLParser):
         with pytest.raises(FileNotFoundError):
             parser.parse("/nonexistent/file.fcpxml")
+
+
+class TestAssetMediaRepresentation:
+    """FCPXML 1.9+ stores asset URLs on media-rep children."""
+
+    @staticmethod
+    def _parse(tmp_path: Path, asset_body: str, asset_attrs: str = "") -> FCPXMLDocument:
+        path = tmp_path / "media-rep.fcpxml"
+        path.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n'
+            '<fcpxml version="1.11"><resources>'
+            '<format id="r1" frameDuration="1/30s" width="1920" height="1080"/>'
+            f'<asset id="r2" name="Talk" start="0s" duration="5s" format="r1"{asset_attrs}>'
+            f"{asset_body}</asset></resources></fcpxml>",
+            encoding="utf-8",
+        )
+        return FCPXMLParser().parse(path)
+
+    def test_original_media_rep_supplies_source(self, tmp_path: Path):
+        doc = self._parse(
+            tmp_path,
+            '<media-rep kind="proxy-media" src="file:///proxy.mov"/>'
+            '<media-rep kind="original-media" src="file:///talk.mov"/>',
+        )
+        assert doc.assets["r2"].src == "file:///talk.mov"
+
+    def test_falls_back_to_first_media_rep(self, tmp_path: Path):
+        doc = self._parse(tmp_path, '<media-rep kind="proxy-media" src="file:///proxy.mov"/>')
+        assert doc.assets["r2"].src == "file:///proxy.mov"
+
+    def test_src_attribute_wins_when_present(self, tmp_path: Path):
+        doc = self._parse(
+            tmp_path,
+            '<media-rep kind="original-media" src="file:///rep.mov"/>',
+            ' src="file:///legacy.mov"',
+        )
+        assert doc.assets["r2"].src == "file:///legacy.mov"
+
+    def test_validator_no_longer_warns_for_media_rep_assets(self, tmp_path: Path):
+        from fcp_mcp.fcpxml.validator import FCPXMLValidator
+
+        doc = self._parse(tmp_path, '<media-rep kind="original-media" src="file:///talk.mov"/>')
+        messages = [issue.message for issue in FCPXMLValidator().validate_document(doc).issues]
+        assert not any("no source path" in message for message in messages)
+
+
+class TestMediaRepThroughTools:
+    """Tool-level effects of reading media-rep sources."""
+
+    @staticmethod
+    def _write(path: Path, media: str) -> None:
+        path.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n'
+            '<fcpxml version="1.11"><resources>'
+            '<format id="r1" frameDuration="1/30s" width="1920" height="1080"/>'
+            '<asset id="r2" name="Fala" start="0s" duration="5s" hasVideo="1" format="r1">'
+            f'<media-rep kind="original-media" src="{media}"/></asset></resources>'
+            '<library><event name="E"><project name="P">'
+            '<sequence format="r1" duration="5s" tcStart="0s"><spine>'
+            '<asset-clip ref="r2" name="Fala" offset="0s" duration="5s"/>'
+            "</spine></sequence></project></event></library></fcpxml>",
+            encoding="utf-8",
+        )
+
+    @pytest.fixture
+    def policy(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from fcp_mcp import server
+        from fcp_mcp.config import RuntimeConfig
+        from fcp_mcp.security.paths import PathPolicy
+
+        config = RuntimeConfig.from_env(
+            {
+                "FCP_MCP_OUTPUT_DIR": str(tmp_path),
+                "FCP_MCP_ALLOWED_ROOTS": str(tmp_path),
+                "FCP_MCP_PROFILE": "full",
+            },
+            home=tmp_path,
+        )
+        monkeypatch.setattr(server, "CONFIG", config)
+        monkeypatch.setattr(server, "PATHS", PathPolicy(config))
+
+    def test_qc_report_does_not_warn_about_missing_source(self, tmp_path: Path, policy):
+        from fcp_mcp import server
+
+        media = tmp_path / "fala.mov"
+        media.write_bytes(b"x")
+        project = tmp_path / "p.fcpxml"
+        self._write(project, media.as_uri())
+
+        report = server.fcpxml_qc_report(str(project))
+
+        assert "no source path" not in report.text
+
+    def test_media_link_check_sees_media_rep_paths(self, tmp_path: Path, policy):
+        from fcp_mcp import server
+
+        project = tmp_path / "p.fcpxml"
+        self._write(project, (tmp_path / "missing.mov").as_uri())
+
+        result = server.fcpxml_check_media_links(str(project))
+
+        assert result.structured.missing_count == 1
+
+    def test_media_rep_outside_allowed_roots_is_refused(self, tmp_path: Path, policy):
+        from fcp_mcp import server
+        from fcp_mcp.contracts import ErrorCode, FCPMCPError
+
+        project = tmp_path / "p.fcpxml"
+        self._write(project, "file:///private/var/elsewhere/fala.mov")
+
+        with pytest.raises(FCPMCPError) as caught:
+            server.fcpxml_check_media_links(str(project))
+        assert caught.value.code is ErrorCode.PATH_OUTSIDE_SCOPE

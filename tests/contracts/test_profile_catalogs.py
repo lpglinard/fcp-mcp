@@ -16,17 +16,17 @@ PageT = TypeVar("PageT")
 
 EXPECTED = {
     "inspect": {
-        "tool_count": 30,
+        "tool_count": 32,
         "prompts": {"qc-check", "youtube-chapters"},
         "resource_count": 0,
     },
     "workflow": {
-        "tool_count": 34,
+        "tool_count": 36,
         "prompts": {"qc-check", "cleanup", "youtube-chapters"},
         "resource_count": 3,
     },
     "edit": {
-        "tool_count": 76,
+        "tool_count": 84,
         "prompts": {
             "qc-check",
             "rough-cut",
@@ -37,7 +37,7 @@ EXPECTED = {
         "resource_count": 3,
     },
     "full": {
-        "tool_count": 97,
+        "tool_count": 105,
         "prompts": {
             "qc-check",
             "rough-cut",

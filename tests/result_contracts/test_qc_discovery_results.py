@@ -89,7 +89,7 @@ def _assert_doctor(model: BaseModel) -> None:
     report = DoctorReport.model_validate(model)
     assert report.profile is Profile.FULL
     assert report.tool_names == sorted(report.tool_names)
-    assert len(report.tool_names) == 97
+    assert len(report.tool_names) == 105
     assert report.resource_count == 0
     assert report.tool_count == len(report.tool_names)
     catalog = next(check for check in report.checks if check.id == "mcp_catalog")
@@ -150,9 +150,13 @@ def _assert_duration(model: BaseModel) -> None:
 
 
 def _assert_motion_templates(model: BaseModel) -> None:
-    assert len(model.templates) == 1
-    assert model.templates[0].category == "Titles"
-    assert model.templates[0].name == "Lower Third"
+    assert [(t.category, t.name) for t in model.templates] == [
+        ("Effects", "Film Look"),
+        ("Titles", "Lower Third"),
+    ]
+    title = model.templates[1]
+    assert title.uid == "~/Titles.localized/Fixture Pack/Lower Third.moti"
+    assert (title.source, title.extension, title.collection) == ("user", ".moti", "Fixture Pack")
 
 
 def _assert_share_destinations(model: BaseModel) -> None:
@@ -239,11 +243,14 @@ def qc_discovery_cases(
     motion_dir = tmp_path / "Motion Templates.localized"
     title_dir = motion_dir / "Titles.localized" / "Fixture Pack"
     title_dir.mkdir(parents=True)
-    (title_dir / "Lower Third.motn").write_text("fixture", encoding="utf-8")
+    (title_dir / "Lower Third.moti").write_text("fixture", encoding="utf-8")
     effect_dir = motion_dir / "Effects.localized" / "Fixture Pack"
     effect_dir.mkdir(parents=True)
     (effect_dir / "Film Look.moef").write_text("fixture", encoding="utf-8")
     monkeypatch.setattr(utility_paths, "motion_templates_dir", lambda: motion_dir)
+    from fcp_mcp.motion import library as motion_library
+
+    monkeypatch.setattr(motion_library, "builtin_template_roots", list)
 
     destinations_dir = tmp_path / "Destinations"
     destinations_dir.mkdir()
@@ -310,7 +317,7 @@ def qc_discovery_cases(
         ),
         "fcp_list_motion_templates": (
             {},
-            json.dumps({"Titles": ["Lower Third"]}, indent=2),
+            json.dumps({"Effects": ["Film Look"], "Titles": ["Lower Third"]}, indent=2),
         ),
         "fcp_list_share_destinations": (
             {},

@@ -673,6 +673,135 @@ class TimelineElementMutationResult(BaseModel):
     element: TimelineElementMutationRecord
 
 
+class _CommittedMutationResult(BaseModel):
+    """Shared envelope of the composition and template mutation results."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["1"] = "1"
+    destination: ArtifactReference
+    receipt: TransactionReceiptResult
+
+
+class _ClipTargetRecord(BaseModel):
+    """Which clip a composition mutation addressed."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    clip_name: str
+    element_type: str
+    occurrence: int
+
+
+class TemplateParamRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    key: str
+    value: str
+
+
+class ClipTransformRecord(_ClipTargetRecord):
+    position: str
+    scale: str
+    rotation: str
+    anchor: str
+    replaced: bool
+    discarded_animated_params: list[str]
+
+
+class ClipTransformMutationResult(_CommittedMutationResult):
+    transform: ClipTransformRecord
+
+
+class VideoEffectRecord(_ClipTargetRecord):
+    effect_ref: str
+    effect_name: str
+    effect_uid: str
+    resource_created: bool
+    filter_count: int
+    parameters: list[TemplateParamRecord]
+
+
+class VideoEffectMutationResult(_CommittedMutationResult):
+    effect: VideoEffectRecord
+
+
+class ConnectedElementRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["title", "generator"]
+    element_type: Literal["title", "video"]
+    name: str
+    ref: str
+    effect_name: str
+    effect_uid: str
+    resource_created: bool
+    parent_name: str
+    parent_element_type: str
+    parent_offset: str
+    parent_start: str
+    timeline_offset: str
+    offset: str
+    duration: str
+    lane: int
+    role: str
+    parameters: list[TemplateParamRecord]
+    has_text_element: bool
+    position: str | None
+
+
+class ConnectedElementMutationResult(_CommittedMutationResult):
+    element: ConnectedElementRecord
+
+
+class TransitionTemplateRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    after_clip_name: str
+    next_clip_name: str
+    name: str
+    offset: str
+    cut: str
+    duration: str
+    effect_ref: str
+    effect_name: str
+    effect_uid: str
+    resource_created: bool
+    parameters: list[TemplateParamRecord]
+
+
+class TransitionTemplateMutationResult(_CommittedMutationResult):
+    transition: TransitionTemplateRecord
+
+
+class TransformKeyframeRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    time: str
+    value: str
+    interp: Literal["linear", "ease", "easeIn", "easeOut"]
+    curve: Literal["linear", "smooth"] | None
+
+
+class TransformAnimationRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    clip_name: str
+    element_type: str
+    occurrence: int
+    param: Literal["position", "scale", "rotation", "anchor"]
+    clip_start: str
+    clip_duration: str
+    transform_created: bool
+    replaced: bool
+    keyframes: list[TransformKeyframeRecord]
+
+
+class TransformKeyframeMutationResult(_CommittedMutationResult):
+    animation: TransformAnimationRecord
+
+
 class FrameRateFormatRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -755,6 +884,15 @@ class MotionTemplateRecord(BaseModel):
     category: str
     name: str
     path: str
+    # Added after v0.3.0; the three fields above keep their meaning.
+    extension: str
+    uid: str
+    source: Literal["user", "built-in"]
+    root: str
+    group: list[str]
+    collection: str | None
+    large_preview: str | None
+    small_preview: str | None
 
 
 class MotionTemplateListResult(BaseModel):
@@ -762,6 +900,71 @@ class MotionTemplateListResult(BaseModel):
 
     schema_version: Literal["1"] = "1"
     templates: list[MotionTemplateRecord]
+
+
+class MotionTemplateSearchResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["1"] = "1"
+    total: int
+    truncated: bool
+    templates: list[MotionTemplateRecord]
+
+
+class MotionTemplateParameterRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    key: str
+    published_name: str
+    object_id: str
+    object_name: str
+    channel: str
+    kind: Literal["group", "menu", "font", "text", "curve", "data", "scalar", "unknown"]
+    default: str | None
+    value: str | None
+    minimum: str | None
+    maximum: str | None
+    options: list[str]
+    key_basis: Literal["published_target", "group_member"]
+    key_confidence: Literal["confirmed_pattern", "unverified"]
+
+
+class MotionTemplateTextLayerRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    object_id: str
+    object_key: str
+    text: str | None
+
+
+class MotionTemplatePluginRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    object_name: str
+    plugin_name: str
+    plugin_uuid: str
+    plugin_version: str | None
+
+
+class MotionTemplateInspectionResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["1"] = "1"
+    template: MotionTemplateRecord
+    ozml_version: str
+    width: int | None
+    height: int | None
+    duration_frames: int | None
+    frame_rate: float | None
+    theme: str | None
+    parameters: list[MotionTemplateParameterRecord]
+    total_parameters: int
+    unnamed_parameters: int
+    truncated: bool
+    text_layers: list[MotionTemplateTextLayerRecord]
+    plugins: list[MotionTemplatePluginRecord]
 
 
 class ShareDestinationListResult(BaseModel):
@@ -833,6 +1036,10 @@ __all__ = [
     "ClipBatchMutationResult",
     "ClipListResult",
     "ClipRecord",
+    "ClipTransformMutationResult",
+    "ClipTransformRecord",
+    "ConnectedElementMutationResult",
+    "ConnectedElementRecord",
     "DiffChangeRecord",
     "DiffCountsRecord",
     "DuplicateDetectionResult",
@@ -860,8 +1067,13 @@ __all__ = [
     "MarkerListResult",
     "MarkerRecord",
     "MediaLinkCheckResult",
+    "MotionTemplateInspectionResult",
     "MotionTemplateListResult",
+    "MotionTemplateParameterRecord",
+    "MotionTemplatePluginRecord",
     "MotionTemplateRecord",
+    "MotionTemplateSearchResult",
+    "MotionTemplateTextLayerRecord",
     "PacingAnalysisResult",
     "PacingHistogram",
     "PacingRecord",
@@ -876,11 +1088,19 @@ __all__ = [
     "ShareDestinationListResult",
     "SubtitleImportResult",
     "TemplateListResult",
+    "TemplateParamRecord",
     "TemplateSaveResult",
     "TimelineStatisticsRecord",
     "TimelineStatsResult",
     "TransactionReceiptResult",
+    "TransformAnimationRecord",
+    "TransformKeyframeMutationResult",
+    "TransformKeyframeRecord",
     "TransitionBatchMutationResult",
+    "TransitionTemplateMutationResult",
+    "TransitionTemplateRecord",
     "UnsupportedToolResult",
     "ValidationIssueRecord",
+    "VideoEffectMutationResult",
+    "VideoEffectRecord",
 ]
